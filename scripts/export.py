@@ -14,7 +14,7 @@ for r in jobs:
     if not ann and r["annual_note"]: ann = r["annual_note"]
     comp=[x for x in [r["pay_basis"] and "Basis: "+r["pay_basis"], r["bonus"] and "Bonus: "+r["bonus"], r["commission"] and "Commission: "+r["commission"], r["equity"] and "Equity: "+r["equity"], r["benefits"] and "Benefits: "+r["benefits"]] if x]
     rows.append({
-     "Rank":r["id"],"Position Title":r["title"],"Company":r["company"],"Place of Work":r.get("place",""),"Street Address":r.get("address",""),"Posted Location":r["location"],"Work Arrangement":r["work_mode"] if r["work_mode"]!="Not stated" else "Not stated in posting","Weekly Hours":r.get("hours_text",""),"Found On":("Employer career site ("+r["ats"]+")") if r["ats"] in ("Greenhouse","Ashby","Lever","Workday") else (r["ats"]+(" (via Job Bank)" if r["ats"]!="Job Bank" else " (Government of Canada)")),
+     "Rank":r["id"],"Position Title":r["title"],"Company":r["company"],"Place of Work":r.get("place",""),"Street Address":r.get("address",""),"Posted Location":r["location"],"Work Arrangement":r["work_mode"] if r["work_mode"]!="Not stated" else "Not stated in posting","Job Type":r.get("emp_type","Not stated"),"Weekly Hours":r.get("hours_text",""),"Found On":("Employer career site ("+r["ats"]+")") if r["ats"] in ("Greenhouse","Ashby","Lever","Workday") else (r["ats"]+(" (via Job Bank)" if r["ats"]!="Job Bank" else " (Government of Canada)")),
      "Job Category":r["category"],"Match Score":r["match"],"Shortlist":"Yes" if r["shortlist"] else "No – screened out (high sales intensity)",
      "Sales Intensity":f'{r["sales_level"]} ({r["sales_intensity"]}/100)' + (": "+", ".join(r["sales_reasons"]) if r["sales_reasons"] else ""),
      "Minimum Salary":money(r["sal_min"],r["frequency"]) if r["salary_disclosed"] else "Salary Not Disclosed",
@@ -35,7 +35,7 @@ ws.append(cols)
 for r in rows: ws.append([r[c] for c in cols])
 hdr=PatternFill("solid",fgColor="1F3A5F")
 for c in ws[1]: c.font=Font(bold=True,color="FFFFFF"); c.fill=hdr; c.alignment=Alignment(wrap_text=True,vertical="top")
-widths={"Place of Work":26,"Street Address":32,"Posted Location":30,"Found On":30,"Job Bank Listing":40,"Position Title":42,"Company":14,"Location":30,"Advertised Compensation":44,"Compensation Details":60,"Annual Equivalent":36,"Market Reference (third-party estimate)":48,"Salary Source":34,"Salary Verification Status":44,"Application Link":50,"Sales Intensity":40,"Pay vs Category":38,"Shortlist":22,"Job Category":28}
+widths={"Job Type":14,"Place of Work":26,"Street Address":32,"Posted Location":30,"Found On":30,"Job Bank Listing":40,"Position Title":42,"Company":14,"Location":30,"Advertised Compensation":44,"Compensation Details":60,"Annual Equivalent":36,"Market Reference (third-party estimate)":48,"Salary Source":34,"Salary Verification Status":44,"Application Link":50,"Sales Intensity":40,"Pay vs Category":38,"Shortlist":22,"Job Category":28}
 for i,c in enumerate(cols,1): ws.column_dimensions[get_column_letter(i)].width=widths.get(c,14)
 for row in ws.iter_rows(min_row=2):
     for c in row: c.alignment=Alignment(wrap_text=True,vertical="top")

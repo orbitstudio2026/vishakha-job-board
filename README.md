@@ -12,6 +12,15 @@ Toronto / GTA and remote-Canada openings for account management, customer succes
 | `data/Vishakha_Toronto_Jobs_Salary.csv` | The same rows as CSV (imports into Google Sheets). |
 | `scripts/` | The scripts that collected and scored the jobs. |
 
+## Tracking applications
+
+Each job row has a circle in the **Applied** column. Tick it after applying, and the job is marked Applied with the date and appears under the **Applied** tab. Ticks are saved in the browser you use, so they stay between visits on that device. Use **Back up list** in the "My applications" card to save a copy, and **Restore from backup** to load it on another browser or device.
+
+## Filters
+
+- **Work type chips:** Full-time, Part-time, Contract, and Remote, Hybrid, On-site. Pick several in one group to see any of them.
+- Other filters: salary range, pay frequency, place of work, category, source, and preference tags.
+
 ## Opening the dashboard
 
 - **GitHub Pages:** Settings → Pages → Source: "Deploy from a branch", Branch `main`, folder `/docs`. The page appears at `https://<your-user>.github.io/<repo-name>/`.

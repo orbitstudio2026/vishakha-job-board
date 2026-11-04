@@ -221,6 +221,20 @@ def work_mode(j):
     if re.search(r"on-?site|in[- ]office", t, re.I): return "On-site"
     return mode_from_text(t)
 
+def employment_type(structured, title, text):
+    """Full-time / Part-time / Contract / Not stated, from a structured field first, then the title, then the posting text."""
+    st = (structured or "").lower()
+    tl = (title or "").lower()
+    tx = (text or "").lower()
+    if re.search(r"contract|fixed[- ]term|temporary|\bsta\b|\d+[- ](?:month|year)", tl): return "Contract"
+    if "part" in st: return "Part-time"
+    if re.search(r"contract|temporary|fixed", st): return "Contract"
+    if "full" in st or "permanent" in st: return "Full-time"
+    if re.search(r"\bpart[- ]time\b", tx) and not re.search(r"\bfull[- ]time\b", tx): return "Part-time"
+    if re.search(r"\b(?:\d+[- ]month|fixed[- ]term|contract (?:role|position)|temporary (?:role|position)|1\.5[- ]year contract)\b", tx): return "Contract"
+    if re.search(r"\bfull[- ]time\b|\bpermanent\b|\bregular,? full", tx): return "Full-time"
+    return "Not stated"
+
 def mode_from_text(t):
     if re.search(r"\b(\d|two|three|four)\s+days?\s+(?:a|per)\s+week\s+(?:in|at)\s+(?:the|our)?\s*office|\bhybrid\b", t, re.I): return "Hybrid"
     if re.search(r"fully remote|100% remote|remote[- ]first|work from anywhere|remote within canada|this (?:role|position) is remote", t, re.I): return "Remote (Canada)"
@@ -252,6 +266,7 @@ for j in raw:
     inten, lvl, why = sales_intensity(j["title"], t, cd)
     ms, nskill, lfl = match(j, cat, lvl, j["loc"])
     rec = dict(
+        emp_type=employment_type(j.get("timeType") or j.get("emp"), j["title"], t),
         id=len(jobs) + 1, title=j["title"].strip(), company=CO_NAME.get(j["co"], j["co"]), location=clean_loc(j["loc"]),
         work_mode=work_mode(j), category=cat, url=j["url"], posted=(str(j.get("updated") or "")[:10] if isinstance(j.get("updated"), str) else ""),
         match=ms, skill_hits=nskill, level_fit=lfl,
@@ -321,7 +336,7 @@ for x in jb:
         s_src, s_stat, board = "Indeed job listing (via Job Bank)", "Employer-advertised on Indeed · not cross-checked on employer site", "Indeed"
     else:
         s_src, s_stat, board = f"{src} job listing (via Job Bank)", f"Employer-advertised on {src} · not cross-checked on employer site", src
-    rec = dict(id=len(jobs) + 1, title=title, company=x["business"], location=x["location"].replace(" (ON)", ", ON"),
+    rec = dict(emp_type=employment_type(x.get("terms"), title, t), id=len(jobs) + 1, title=title, company=x["business"], location=x["location"].replace(" (ON)", ", ON"),
                address=x.get("address", ""), work_mode=wl, category=cat, url=x.get("source_url") or x["url"], board_url=x["url"],
                posted="", posted_text=x.get("date", ""), match=ms, skill_hits=nskill, level_fit=lfl,
                sales_intensity=inten, sales_level=lvl, sales_reasons=why, shortlist=(lvl != "High"),
@@ -364,7 +379,7 @@ for f in sorted(_g.glob(S + "/indeed/batch*.json")):
         inten, lvl, why = sales_intensity(title, t, cd)
         ms, nskill, lfl = match(pseudo, cat, lvl, x["location"])
         wl = {"On site": "On-site", "Hybrid": "Hybrid", "Remote": "Remote (Canada)"}.get(x.get("work"), "") or mode_from_text(t)
-        rec = dict(id=len(jobs) + 1, title=title, company=co, location=x["location"], address=x.get("address", ""), work_mode=wl,
+        rec = dict(emp_type=employment_type(x.get("type"), title, t), id=len(jobs) + 1, title=title, company=co, location=x["location"], address=x.get("address", ""), work_mode=wl,
                    category=cat, url=x["url"], board_url="", posted="", posted_text=x.get("posted", ""), match=ms, skill_hits=nskill,
                    level_fit=lfl, sales_intensity=inten, sales_level=lvl, sales_reasons=why, shortlist=(lvl != "High"),
                    bonus=cd.get("bonus", ""), commission=cd.get("commission", ""), equity=cd.get("equity", ""), benefits=cd.get("benefits", ""),

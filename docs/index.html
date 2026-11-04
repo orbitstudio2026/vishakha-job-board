@@ -81,6 +81,13 @@ window.dash = (function () {
   };
 })();
 </script>
+<script>
+/* Applied tracking for this browser (GitHub Pages copy). */
+window.vjStore = {
+  get() { try { return JSON.parse(localStorage.getItem('vj-applied') || '{}') || {}; } catch (e) { return {}; } },
+  set(m) { try { localStorage.setItem('vj-applied', JSON.stringify(m)); } catch (e) { /* storage unavailable */ } },
+};
+</script>
 <style>
   /* Layout: warm frosted workspace. Top bar, then three columns: left (search + preference tags + filters), main (welcome, KPIs, tabs, job table), right (gauge, sources, places, categories). Compensation chart and method notes below.
      Palette: warm peach/yellow glow behind white cards, orange accent for actions, violet for preferred tags (kept outside the warm palette), green/orange/red score pills. */
@@ -200,7 +207,7 @@ window.dash = (function () {
 
   /* Job table */
   .vj-tbl { display: flex; flex-direction: column; min-height: 16rem; }
-  .vj-thead, .vj-tr { display: grid; grid-template-columns: minmax(13rem, 2.3fr) 5.2rem minmax(8rem, 1.3fr) minmax(8rem, 1.2fr) 6.8rem 2rem; gap: .75rem; align-items: center; padding: .55rem .6rem; }
+  .vj-thead, .vj-tr { display: grid; grid-template-columns: minmax(13rem, 2.3fr) 5.2rem minmax(8rem, 1.3fr) minmax(8rem, 1.2fr) 6.8rem 3rem 2rem; gap: .75rem; align-items: center; padding: .55rem .6rem; }
   .vj-thead { font-size: 11px; color: var(--color-fg-muted); border-bottom: 1px solid var(--vj-line); }
   .vj-rowwrap { border-bottom: 1px solid var(--vj-line); }
   .vj-rowwrap:last-child { border-bottom: 0; }
@@ -248,9 +255,31 @@ window.dash = (function () {
   .vj-empty { color: var(--color-fg-muted); padding: 2rem .6rem; font-size: 13px; }
   @media (max-width: 46rem) {
     .vj-thead { display: none; }
-    .vj-tr { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "who score" "pay pay" "place mode"; row-gap: .4rem; }
-    .vj-tr .c-who { grid-area: who; } .vj-tr .c-score { grid-area: score; } .vj-tr .c-pay { grid-area: pay; } .vj-tr .c-place { grid-area: place; } .vj-tr .c-mode { grid-area: mode; } .vj-tr .vj-act { display: none; }
+    .vj-tr { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "who score" "pay applied" "place mode"; row-gap: .4rem; }
+    .vj-tr .c-who { grid-area: who; } .vj-tr .c-score { grid-area: score; } .vj-tr .c-pay { grid-area: pay; } .vj-tr .c-place { grid-area: place; } .vj-tr .c-mode { grid-area: mode; } .vj-tr .c-applied { grid-area: applied; justify-self: end; } .vj-tr .vj-act { display: none; }
   }
+
+  /* Work type chips */
+  .vj-wt { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+  .vj-wt-l { font-size: 11px; color: var(--color-fg-muted); font-weight: 500; margin-right: .2rem; }
+  .vj-wt-sep { width: 1px; height: 18px; background: var(--vj-line); margin: 0 .2rem; }
+  .vj-wtb { font: inherit; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; min-height: 2rem; padding: 0 .8rem; border-radius: 999px; border: 1px solid var(--vj-line); background: var(--color-panel); color: var(--color-fg); cursor: pointer; transition: background var(--cds-dur-slow), border-color var(--cds-dur-slow); }
+  .vj-wtb svg { width: 13px; height: 13px; }
+  .vj-wtb:hover { border-color: var(--vj-orange); }
+  .vj-wtb[aria-pressed="true"] { background: color-mix(in srgb, var(--vj-orange) 14%, var(--color-panel)); border-color: var(--vj-orange); color: var(--color-fg); font-weight: 500; }
+  .vj-wtb .vj-n { opacity: .65; font-variant-numeric: tabular-nums; }
+  /* Applied tracking */
+  .vj-apb { font: inherit; width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--color-fg) 22%, transparent); background: var(--color-panel); color: transparent; display: grid; place-items: center; cursor: pointer; padding: 0; transition: background var(--cds-dur-slow), border-color var(--cds-dur-slow), color var(--cds-dur-slow); }
+  .vj-apb svg { width: 15px; height: 15px; }
+  .vj-apb:hover { border-color: var(--vj-green); color: color-mix(in srgb, var(--vj-green) 60%, transparent); }
+  .vj-apb[aria-pressed="true"] { background: var(--vj-green); border-color: var(--vj-green); color: #fff; }
+  .vj-rowwrap.vj-isapplied > summary { background: color-mix(in srgb, var(--vj-green) 7%, transparent); }
+  .vj-applied-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; color: var(--vj-green); letter-spacing: .02em; text-transform: uppercase; margin-left: 6px; vertical-align: 1px; }
+  .vj-mini-btns { display: flex; flex-wrap: wrap; gap: .5rem; }
+  .vj-mini { font: inherit; font-size: 12px; min-height: 2.1rem; padding: 0 .9rem; border-radius: 999px; border: 1px solid var(--vj-line); background: var(--color-panel); color: var(--color-fg); cursor: pointer; }
+  .vj-mini:hover { border-color: var(--vj-green); }
+  .vj-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .vj-big-applied { font-size: 2.4rem; font-weight: 300; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; color: var(--vj-green); min-height: 1em; }
 
   /* Right column */
   .vj-gauge { position: relative; min-height: 9.5rem; display: grid; place-items: end center; }
@@ -335,6 +364,17 @@ window.dash = (function () {
         </div>
       </section>
 
+      <section class="vj-card vj-applied-ui" id="my-applications" hidden>
+        <div class="vj-card-head"><h2>My applications</h2><span class="vj-muted">Saved in this browser</span></div>
+        <p class="vj-big-applied" data-draw="applied-count" data-source="jobs">—</p>
+        <p class="vj-muted">Tick the circle on a job once you've applied. Back up your list to keep it if you switch browsers or clear site data.</p>
+        <div class="vj-mini-btns">
+          <button class="vj-mini vj-backup" type="button">Back up list</button>
+          <label class="vj-mini" for="vj-restore" style="display:inline-flex;align-items:center">Restore from backup</label>
+          <input id="vj-restore" class="vj-file vj-restore" type="file" accept="application/json,.json">
+        </div>
+      </section>
+
       <section class="vj-card" id="filters" aria-label="Filters">
         <div class="vj-card-head"><h2>Filters</h2><button class="vj-link vj-reset" type="button">Reset</button></div>
         <div class="vj-pair">
@@ -343,13 +383,11 @@ window.dash = (function () {
         </div>
         <div class="vj-field"><label for="vj-freq">Pay frequency</label>
           <select id="vj-freq" class="vj-freq"><option value="all">Any frequency</option><option value="Annual">Annual salary</option><option value="Hourly">Hourly pay</option><option value="Monthly">Monthly pay</option></select></div>
-        <div class="vj-field"><label for="vj-mode">Work arrangement</label>
-          <select id="vj-mode" class="vj-mode-sel"><option value="">Any arrangement</option><option value="Hybrid">Hybrid</option><option value="Remote (Canada)">Remote (Canada)</option><option value="On-site">On-site</option><option value="Not stated">Not stated in posting</option></select></div>
         <div class="vj-field"><label for="vj-place">Place of work</label><select id="vj-place" data-draw="placesel" data-source="jobs"></select></div>
         <div class="vj-field"><label for="vj-cat">Job category</label><select id="vj-cat" data-draw="catsel" data-source="by_category"></select></div>
         <div class="vj-field"><label for="vj-src">Found on</label>
           <select id="vj-src" class="vj-src-sel"><option value="">All sources</option><option value="employer">Employer career sites</option><option value="Job Bank">Job Bank</option><option value="Indeed">Indeed</option><option value="other">Other job boards</option></select></div>
-        <p class="vj-muted">Salary filters use the yearly equivalent. Jobs without a published salary stay in the list.</p>
+        <p class="vj-muted">Salary filters use the yearly equivalent. Jobs without a published salary stay in the list. Work type chips: pick several in a group to see any of them.</p>
       </section>
     </aside>
 
@@ -364,6 +402,7 @@ window.dash = (function () {
             <div class="vj-kpi"><span class="vj-big dash-skeleton" data-draw="k-total" data-source="summary" data-field="total">—</span><span class="vj-lbl">Openings</span></div>
             <div class="vj-kpi"><span class="vj-big dash-skeleton" data-draw="k-short" data-source="summary" data-field="shortlisted">—</span><span class="vj-lbl">Shortlisted</span></div>
             <div class="vj-kpi vj-kpi-v"><span class="vj-big dash-skeleton" data-draw="k-strong" data-source="jobs">—</span><span class="vj-lbl">Strong fits</span></div>
+            <div class="vj-kpi vj-applied-ui" hidden><span class="vj-big" data-draw="k-applied" data-source="jobs">—</span><span class="vj-lbl">Applied</span></div>
           </div>
         </div>
 
@@ -374,6 +413,7 @@ window.dash = (function () {
             <button class="vj-tab" type="button" data-view="nodisc" aria-pressed="false">Not disclosed</button>
             <button class="vj-tab" type="button" data-view="out" aria-pressed="false">Screened out</button>
             <button class="vj-tab" type="button" data-view="all" aria-pressed="false">All</button>
+            <button class="vj-tab vj-applied-ui" type="button" data-view="applied" aria-pressed="false" hidden>Applied</button>
           </div>
           <div class="vj-search">
             <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M4.5 8h7M6.5 12h3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -382,8 +422,19 @@ window.dash = (function () {
           </div>
         </div>
 
+        <div class="vj-wt" role="group" aria-label="Filter by work type" id="work-type">
+          <span class="vj-wt-l">Work type</span>
+          <button class="vj-wtb" type="button" data-et="Full-time" aria-pressed="false">Full-time <span class="vj-n" data-draw="et-Full-time" data-source="jobs">—</span></button>
+          <button class="vj-wtb" type="button" data-et="Part-time" aria-pressed="false">Part-time <span class="vj-n" data-draw="et-Part-time" data-source="jobs">—</span></button>
+          <button class="vj-wtb" type="button" data-et="Contract" aria-pressed="false">Contract <span class="vj-n" data-draw="et-Contract" data-source="jobs">—</span></button>
+          <span class="vj-wt-sep" aria-hidden="true"></span>
+          <button class="vj-wtb" type="button" data-wm="Remote" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12zM2 8h12M8 2c1.8 1.8 2.7 3.8 2.7 6S9.8 12.2 8 14M8 2C6.2 3.8 5.3 5.8 5.3 8s.9 4.2 2.7 6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Remote <span class="vj-n" data-draw="wm-Remote" data-source="jobs">—</span></button>
+          <button class="vj-wtb" type="button" data-wm="Hybrid" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 13.5h12M3.5 13.5V6L8 2.5 12.5 6v7.5M6.5 13.5v-4h3v4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>Hybrid <span class="vj-n" data-draw="wm-Hybrid" data-source="jobs">—</span></button>
+          <button class="vj-wtb" type="button" data-wm="On-site" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 14V3.5L8 2v12M8 6h5.5v8M1.5 14h13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>On-site <span class="vj-n" data-draw="wm-On-site" data-source="jobs">—</span></button>
+        </div>
+
         <div class="vj-tbl" role="table" aria-label="Job openings">
-          <div class="vj-thead" role="row"><span role="columnheader">Role</span><span role="columnheader">Match</span><span role="columnheader">Salary (CAD)</span><span role="columnheader">Place of work</span><span role="columnheader">Arrangement</span><span role="columnheader"></span></div>
+          <div class="vj-thead" role="row"><span role="columnheader">Role</span><span role="columnheader">Match</span><span role="columnheader">Salary (CAD)</span><span role="columnheader">Place of work</span><span role="columnheader">Arrangement</span><span role="columnheader" class="vj-applied-ui" hidden>Applied</span><span role="columnheader"></span></div>
           <div data-draw="rows" data-source="jobs">—</div>
         </div>
         <p class="vj-muted"><b data-draw="shown" data-source="jobs">—</b> openings match. Violet tags mark what fits her preferences; red outlines mark things to check.</p>
@@ -434,7 +485,7 @@ window.dash = (function () {
 </div>
 
 </div>
-<p class="vj-foot-note">Data: employer career sites, Canada's Job Bank and Indeed, pulled 4 Nov 2026. Salaries are as advertised; see the Method notes above.</p>
+<p class="vj-foot-note">Data: employer career sites, Canada's Job Bank and Indeed, pulled 4 Nov 2026. Applied ticks are saved in this browser only; use "Back up list" to keep a copy.</p>
 <script>
   window.vj = window.vj || {};
   const V = window.vj;
@@ -446,7 +497,20 @@ window.dash = (function () {
   V.mid = (r) => (V.num(r.annual_min) + V.num(r.annual_max)) / 2;
   V.isBase = (r) => V.bool(r.salary_disclosed) && r.frequency === 'Annual' && !String(r.pay_basis || '').includes('OTE');
   V.TH = { match: 80, above: 10, strong: 5, page: 25 };
-  V.defaults = { q: '', cat: '', view: 'short', freq: 'all', minA: null, maxA: null, mode: '', sort: 'match', tags: [], limit: V.TH.page, place: '', src: '' };
+  V.defaults = { q: '', cat: '', view: 'short', freq: 'all', minA: null, maxA: null, sort: 'match', tags: [], limit: V.TH.page, place: '', src: '', et: [], wm: [], rev: 0 };
+  // Applied tracking: only where the host page provides a store (the GitHub Pages copy saves it in this browser).
+  V.store = window.vjStore || null;
+  V.akey = (r) => `${r.company}|${r.title}|${r.url}`;
+  V.appliedMap = () => (V.store ? V.store.get() : {});
+  V.isApplied = (r, m) => !!(m || V.appliedMap())[V.akey(r)];
+  V.toggleApplied = (r) => {
+    if (!V.store) return;
+    const m = V.appliedMap(), k = V.akey(r);
+    if (m[k]) delete m[k]; else m[k] = { at: new Date().toISOString().slice(0, 10), title: r.title, company: r.company, url: r.url };
+    V.store.set(m);
+    dash.setParams({ rev: (V.num(dash.params().rev) || 0) + 1 });
+  };
+  V.wmKey = (r) => { const m = String(r.work_mode); return m.startsWith('Remote') ? 'Remote' : m.startsWith('Hybrid') ? 'Hybrid' : m === 'On-site' ? 'On-site' : 'Not stated'; };
   V.board = (r) => (['Greenhouse', 'Ashby', 'Lever', 'Workday'].includes(r.ats) ? 'employer' : r.ats);
   V.SRC = [
     { key: 'employer', label: 'Employer career sites', color: '#F26B3A' },
@@ -522,7 +586,18 @@ window.dash = (function () {
   const each = (sel, fn) => document.querySelectorAll(sel).forEach(fn);
   const set = (o) => dash.setParams({ ...o, limit: V.TH.page });
   each('.vj-q', (el) => el.addEventListener('input', () => set({ q: el.value })));
-  each('.vj-mode-sel', (el) => el.addEventListener('change', () => set({ mode: el.value })));
+  const toggleList = (name, val) => { const cur = Array.isArray(dash.params()[name]) ? dash.params()[name].slice() : []; const i = cur.indexOf(val); if (i >= 0) cur.splice(i, 1); else cur.push(val); set({ [name]: cur }); };
+  each('.vj-wtb[data-et]', (el) => el.addEventListener('click', () => toggleList('et', el.dataset.et)));
+  each('.vj-wtb[data-wm]', (el) => el.addEventListener('click', () => toggleList('wm', el.dataset.wm)));
+  each('.vj-backup', (el) => el.addEventListener('click', () => {
+    if (!V.store) return;
+    const blob = new Blob([JSON.stringify(V.appliedMap(), null, 1)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'my-applications.json'; document.body.appendChild(a); a.click(); a.remove();
+  }));
+  each('.vj-restore', (el) => el.addEventListener('change', () => {
+    const f = el.files && el.files[0]; if (!f || !V.store) return;
+    f.text().then((t) => { try { const m = JSON.parse(t); if (m && typeof m === 'object') { V.store.set(Object.assign(V.appliedMap(), m)); dash.setParams({ rev: (V.num(dash.params().rev) || 0) + 1 }); } } catch (e) { /* not a backup file */ } el.value = ''; });
+  }));
   each('.vj-src-sel', (el) => el.addEventListener('change', () => set({ src: el.value })));
   each('.vj-sort', (el) => el.addEventListener('change', () => set({ sort: el.value })));
   each('.vj-tab', (el) => el.addEventListener('click', () => set({ view: el.dataset.view })));
@@ -548,15 +623,19 @@ window.dash = (function () {
     const minA = V.num(p.minA), maxA = V.num(p.maxA);
     const tags = Array.isArray(p.tags) ? p.tags : [];
     const view = p.view || 'short';
+    const am = V.appliedMap();
+    const et = Array.isArray(p.et) ? p.et : [], wm = Array.isArray(p.wm) ? p.wm : [];
     let out = rows.filter((r) => {
+      if (view === 'applied' && !V.isApplied(r, am)) return false;
+      if (et.length && !et.includes(r.emp_type)) return false;
+      if (wm.length && !wm.includes(V.wmKey(r))) return false;
       const disc = V.bool(r.salary_disclosed), short = V.bool(r.shortlist);
-      if (view === 'short' && !short) return false;
+      if (view === 'short' && !short && !V.isApplied(r, am)) return false;
       if (view === 'out' && short) return false;
       if (view === 'disc' && (!disc || !short)) return false;
       if (view === 'nodisc' && (disc || !short)) return false;
       if (q && !(`${r.title} ${r.company} ${r.location} ${r.place}`.toLowerCase().includes(q))) return false;
       if (p.cat && r.category !== p.cat) return false;
-      if (p.mode && !String(r.work_mode).startsWith(p.mode)) return false;
       if (p.place && V.cityOf(r) !== p.place) return false;
       if (p.src && V.srcKey(r) !== p.src) return false;
       if (p.freq && p.freq !== 'all' && (!disc || r.frequency !== p.freq)) return false;
@@ -578,7 +657,10 @@ window.dash = (function () {
   dash.onData(() => {
     const p = dash.params();
     each('.vj-q', (el) => { if (el !== document.activeElement) el.value = p.q ?? ''; });
-    each('.vj-mode-sel', (el) => { el.value = p.mode ?? ''; });
+    const etl = Array.isArray(p.et) ? p.et : [], wml = Array.isArray(p.wm) ? p.wm : [];
+    each('.vj-wtb[data-et]', (el) => el.setAttribute('aria-pressed', etl.includes(el.dataset.et) ? 'true' : 'false'));
+    each('.vj-wtb[data-wm]', (el) => el.setAttribute('aria-pressed', wml.includes(el.dataset.wm) ? 'true' : 'false'));
+    each('.vj-applied-ui', (el) => { el.hidden = !V.store; });
     each('.vj-src-sel', (el) => { el.value = p.src ?? ''; });
     each('.vj-sort', (el) => { el.value = p.sort ?? 'match'; });
     each('.vj-tab', (el) => el.setAttribute('aria-pressed', (p.view ?? 'short') === el.dataset.view ? 'true' : 'false'));
@@ -631,6 +713,23 @@ window.dash = (function () {
     el.title = `${Math.round(share * 100)}% of openings`;
   });
   stripe('stripe-yes', true); stripe('stripe-no', false);
+
+  ['Full-time', 'Part-time', 'Contract'].forEach((t) => dash.draw('et-' + t, (el) => {
+    const j = dash.data('jobs');
+    el.textContent = j.status === 'ok' ? d3.format(',')(j.data.filter((r) => V.bool(r.shortlist) && r.emp_type === t).length) : '—';
+  }));
+  ['Remote', 'Hybrid', 'On-site'].forEach((t) => dash.draw('wm-' + t, (el) => {
+    const j = dash.data('jobs');
+    el.textContent = j.status === 'ok' ? d3.format(',')(j.data.filter((r) => V.bool(r.shortlist) && V.wmKey(r) === t).length) : '—';
+  }));
+  const appliedCount = (el) => {
+    const j = dash.data('jobs');
+    if (j.status !== 'ok') { el.textContent = '—'; return; }
+    const m = V.appliedMap();
+    el.textContent = d3.format(',')(j.data.filter((r) => V.isApplied(r, m)).length);
+  };
+  dash.draw('applied-count', appliedCount);
+  dash.draw('k-applied', appliedCount);
 
   // ---- selects whose choices are data ----
   dash.draw('catsel', (sel) => {
@@ -686,12 +785,16 @@ window.dash = (function () {
     const all = V.filtered(j.data);
     if (!all.length) { el.replaceChildren(mk('p', 'vj-empty', 'No openings match these filters. Clear a tag or widen the salary range.')); return; }
     const rows = all.slice(0, V.num(dash.params().limit) || V.TH.page);
+    const am = V.appliedMap();
     el.replaceChildren(...rows.map((r) => {
-      const wrap = mk('details', 'vj-rowwrap' + (V.bool(r.shortlist) ? '' : ' vj-out'));
+      const applied = V.isApplied(r, am);
+      const wrap = mk('details', 'vj-rowwrap' + (V.bool(r.shortlist) ? '' : ' vj-out') + (applied ? ' vj-isapplied' : ''));
       const sum = mk('summary', 'vj-tr'); sum.setAttribute('role', 'row');
       const who = mk('div', 'vj-who c-who');
       const av = mk('span', 'vj-av', String(r.company || '?').trim().charAt(0).toUpperCase()); av.style.background = avColor(r.company);
-      const wt = mk('div'); wt.append(mk('h3', '', r.title), mk('p', 'vj-sub', r.company));
+      const h = mk('h3', '', r.title);
+      const wt = mk('div'); wt.append(h, mk('p', 'vj-sub', `${r.company}${r.emp_type && r.emp_type !== 'Not stated' ? ' · ' + r.emp_type : ''}`));
+      if (applied) { const at = mk('span', 'vj-applied-tag'); at.append(svg(IC.check, 10), `Applied ${am[V.akey(r)].at || ''}`); wt.querySelector('.vj-sub').append(at); }
       who.append(av, wt);
       const m = V.num(r.match);
       const sc = mk('span', 'vj-pill c-score ' + (m >= V.TH.match ? 'g' : m >= 60 ? 'a' : 'r'), `${m}%`); sc.title = 'Match score';
@@ -699,7 +802,17 @@ window.dash = (function () {
       const pl = mk('div', 'vj-place c-place'); pl.append(mk('span', '', r.place || r.location)); if (r.address) pl.append(mk('span', 'vj-sub', r.address));
       const mode = mk('span', 'vj-mode c-mode'); mode.append(svg(modeIcon(r.work_mode), 12), r.work_mode === 'Not stated' ? 'Not stated' : r.work_mode.replace(' (Canada)', ''));
       const act = mk('span', 'vj-act'); act.append(svg(IC.chev, 16));
-      sum.append(who, sc, pay, pl, mode, act);
+      const cells = [who, sc, pay, pl, mode];
+      if (V.store) {
+        const ab = mk('button', 'vj-apb c-applied'); ab.type = 'button';
+        ab.setAttribute('aria-pressed', applied ? 'true' : 'false');
+        ab.setAttribute('aria-label', applied ? `Mark ${r.title} as not applied` : `Mark ${r.title} as applied`);
+        ab.title = applied ? 'Applied (tap to undo)' : 'Mark as applied';
+        ab.append(svg(IC.check, 15));
+        ab.addEventListener('click', (ev) => { ev.preventDefault(); ev.stopPropagation(); V.toggleApplied(r); });
+        cells.push(ab);
+      } else cells.push(mk('span'));
+      sum.append(...cells, act);
       wrap.append(sum);
 
       const det = mk('div', 'vj-detail');
@@ -728,7 +841,7 @@ window.dash = (function () {
       const b3 = mk('div', 'vj-dblock'); b3.append(mk('span', 'vj-dlabel', 'Place of work'));
       b3.append(mk('p', 'vj-line', r.place || r.location));
       if (r.address) b3.append(mk('p', 'vj-line m', r.address));
-      b3.append(mk('p', 'vj-line m', r.work_mode === 'Not stated' ? 'Arrangement not stated in posting' : r.work_mode));
+      b3.append(mk('p', 'vj-line m', `${r.work_mode === 'Not stated' ? 'Arrangement not stated in posting' : r.work_mode} · ${r.emp_type && r.emp_type !== 'Not stated' ? r.emp_type : 'Job type not stated'}`));
       if (r.hours_text) b3.append(mk('p', 'vj-line m', r.hours_text));
       if (r.benefits) b3.append(mk('p', 'vj-line m', `Benefits: ${r.benefits}`));
       if (!V.bool(r.shortlist)) b3.append(mk('p', 'vj-line m', `Screened out: sales intensity ${r.sales_intensity}/100 (${r.sales_reasons})`));
