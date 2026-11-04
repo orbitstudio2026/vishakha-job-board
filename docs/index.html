@@ -1,0 +1,863 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vishakha's Toronto Job Board</title>
+<style>
+  :root {
+    --color-fg: #1F1A17; --color-fg-muted: #6B625C; --color-bg: #FFFAF5; --color-panel: #FFFFFF;
+    --color-border-line: rgba(31,26,23,.1); --color-ok: #0E9F6E; --color-warn: #B45309; --color-bad: #D92D20;
+    --cds-border: rgba(31,26,23,.12); --cds-chart-axis: rgba(31,26,23,.25); --cds-chart-grid: rgba(31,26,23,.07); --cds-chart-muted: rgba(31,26,23,.25);
+    --cds-dur-slow: 220ms; --cds-ease-out: cubic-bezier(.2,.7,.2,1); --cds-font-size-caption: 12px; --cds-pad-xs: 4px; --cds-pad-sm: 8px; --cds-radius: 8px;
+    --cds-shadow-popover: 0 8px 24px rgba(0,0,0,.12); --cds-surface-popover: #FFFFFF; --cds-text-secondary: #6B625C;
+    --font-anthropic-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-anthropic-serif: Georgia, "Times New Roman", serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-fg: #F4EEE9; --color-fg-muted: #B3A9A1; --color-bg: #171311; --color-panel: #221C19;
+      --color-border-line: rgba(244,238,233,.12); --cds-border: rgba(244,238,233,.14); --cds-chart-axis: rgba(244,238,233,.3);
+      --cds-chart-grid: rgba(244,238,233,.08); --cds-chart-muted: rgba(244,238,233,.28); --cds-surface-popover: #2A2320; --cds-text-secondary: #B3A9A1;
+      color-scheme: dark;
+    }
+  }
+  html, body { margin: 0; background: var(--color-bg); color: var(--color-fg); font-family: var(--font-anthropic-sans); font-size: 14px; }
+  body { padding: 16px max(16px, env(safe-area-inset-right, 0px)) 32px max(16px, env(safe-area-inset-left, 0px)); }
+  [hidden] { display: none !important; }
+  .dash-skeleton { color: transparent; background: rgba(127,127,127,.12); border-radius: 6px; }
+  .vj-foot-note { max-width: 1600px; margin: 16px auto 0; color: var(--color-fg-muted); font-size: 12px; }
+  .vj-wrap { max-width: 1600px; margin: 0 auto; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script>
+/* Minimal stand-in for the dashboard runtime, so this page runs on GitHub Pages. */
+window.dash = (function () {
+  const datasets = {}, calcs = {}, draws = {}, onDataFns = [];
+  let params = {}, scheduled = false, started = false;
+  const colors = ['#3B82F6', '#F26B3A', '#12B76A', '#7A5AF8', '#FDB022', '#EC4899', '#14B8A6', '#EF4444'];
+  function calcResult(id) {
+    const c = calcs[id];
+    const ins = c.inputs.map((i) => data(i));
+    if (ins.some((d) => d.status !== 'ok')) return { status: 'loading', data: [] };
+    if (!c.cache) c.cache = { status: 'ok', data: c.fn(...ins.map((d) => d.data)) };
+    return c.cache;
+  }
+  function data(id) {
+    if (calcs[id]) return calcResult(id);
+    return datasets[id] || { status: 'loading', data: [] };
+  }
+  function run() {
+    scheduled = false;
+    onDataFns.forEach((f) => { try { f(); } catch (e) { console.error(e); } });
+    Object.entries(draws).forEach(([name, fn]) => {
+      document.querySelectorAll('[data-draw="' + name + '"]').forEach((el) => { try { fn(el); } catch (e) { console.error(name, e); } });
+    });
+  }
+  function schedule() { if (started && !scheduled) { scheduled = true; requestAnimationFrame(run); } }
+  return {
+    colors,
+    data,
+    calc(id, spec) { calcs[id] = { inputs: spec.inputs, fn: spec.fn }; },
+    draw(name, fn) { draws[name] = fn; schedule(); },
+    onData(fn) { onDataFns.push(fn); schedule(); },
+    params() { return params; },
+    setParams(o) { params = Object.assign({}, params, o); schedule(); },
+    resetParams() { params = {}; schedule(); },
+    setLink() {},
+    refresh() {},
+    start(url) {
+      started = true;
+      datasets.jobs = { status: 'loading', data: [] };
+      run();
+      fetch(url).then((r) => r.json()).then((rows) => {
+        datasets.jobs = { status: 'ok', data: rows };
+        Object.values(calcs).forEach((c) => { c.cache = null; });
+        run();
+      }).catch(() => { datasets.jobs = { status: 'error', data: [] }; run(); });
+      let t; window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(run, 150); });
+    },
+  };
+})();
+</script>
+<style>
+  /* Layout: warm frosted workspace. Top bar, then three columns: left (search + preference tags + filters), main (welcome, KPIs, tabs, job table), right (gauge, sources, places, categories). Compensation chart and method notes below.
+     Palette: warm peach/yellow glow behind white cards, orange accent for actions, violet for preferred tags (kept outside the warm palette), green/orange/red score pills. */
+  .vj {
+    --vj-orange: #F26B3A;
+    --vj-orange-ink: #FFFFFF;
+    --vj-violet: #5B4FE0;
+    --vj-violet-ink: #FFFFFF;
+    --vj-green: #12B76A;
+    --vj-amber: #F79009;
+    --vj-red: #F04438;
+    --vj-gold: #FDB022;
+    --vj-card: color-mix(in srgb, var(--color-panel) 88%, transparent);
+    --vj-line: color-mix(in srgb, var(--color-fg) 8%, transparent);
+    --vj-soft: color-mix(in srgb, var(--color-fg) 4%, transparent);
+    --vj-r: 20px;
+    --vj-r-sm: 12px;
+    --vj-shadow: 0 1px 2px rgba(120, 72, 30, .05), 0 12px 32px -16px rgba(120, 72, 30, .22);
+    position: relative;
+    display: flex; flex-direction: column; gap: 1rem;
+    padding: 1rem;
+    border-radius: 28px;
+    font-family: var(--font-anthropic-sans); color: var(--color-fg);
+    background:
+      radial-gradient(60rem 40rem at 0% 0%, color-mix(in srgb, #FFB27A 34%, transparent), transparent 60%),
+      radial-gradient(50rem 36rem at 70% 10%, color-mix(in srgb, #FFE08A 32%, transparent), transparent 60%),
+      radial-gradient(40rem 30rem at 100% 90%, color-mix(in srgb, #FFC9A3 26%, transparent), transparent 60%),
+      color-mix(in srgb, var(--color-bg) 92%, #FFF4EA);
+  }
+  .vj p, .vj h1, .vj h2, .vj h3 { margin: 0; }
+  .vj h1 { font-weight: 400; font-size: clamp(1.5rem, 1.1rem + 1.2vw, 2rem); letter-spacing: -.02em; line-height: 1.15; text-wrap: balance; }
+  .vj h2 { font-weight: 500; font-size: 15px; letter-spacing: -.005em; }
+  .vj h3 { font-weight: 500; font-size: 14px; line-height: 1.35; }
+  .vj .vj-muted { color: var(--color-fg-muted); font-size: 12px; line-height: 1.5; }
+  .vj b { font-weight: 500; font-variant-numeric: tabular-nums; }
+  .vj :is(input, select, button, a, summary):focus-visible { outline: 2px solid var(--vj-orange); outline-offset: 2px; }
+  .vj-card { background: var(--vj-card); border: 1px solid var(--vj-line); border-radius: var(--vj-r); box-shadow: var(--vj-shadow); padding: 1.1rem; display: flex; flex-direction: column; gap: .8rem; min-width: 0; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+  .vj-card-head { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+  .vj-icon-btn { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--vj-line); background: var(--color-panel); color: var(--color-fg-muted); flex: none; }
+  .vj-icon-btn svg { width: 14px; height: 14px; }
+
+  /* Top bar */
+  .vj-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: .4rem .4rem .4rem .6rem; }
+  .vj-brand { display: flex; align-items: center; gap: .55rem; font-weight: 500; font-size: 14px; }
+  .vj-logo { width: 26px; height: 26px; border-radius: 8px; background: var(--vj-orange); display: grid; place-items: center; color: #fff; }
+  .vj-logo svg { width: 15px; height: 15px; }
+  .vj-top-right { display: flex; align-items: center; gap: .9rem; }
+  .vj-date { display: flex; align-items: center; gap: .4rem; }
+  .vj-date-num { font-size: 1.75rem; font-weight: 300; letter-spacing: -.03em; line-height: 1; }
+  .vj-date-txt { font-size: 10px; line-height: 1.25; color: var(--color-fg-muted); }
+  .vj-cta { font: inherit; display: inline-flex; align-items: center; gap: .45rem; min-height: 2.4rem; padding: 0 1.05rem; border-radius: 999px; border: 0; background: var(--vj-orange); color: var(--vj-orange-ink); font-size: 13px; font-weight: 500; cursor: pointer; box-shadow: 0 6px 16px -8px var(--vj-orange); transition: transform var(--cds-dur-slow), box-shadow var(--cds-dur-slow); }
+  .vj-cta:hover { transform: translateY(-1px); box-shadow: 0 10px 22px -10px var(--vj-orange); }
+  .vj-cta svg { width: 14px; height: 14px; }
+
+  /* Columns */
+  .vj-cols { display: grid; grid-template-columns: 18.5rem minmax(0, 1fr) 19rem; gap: 1rem; align-items: start; }
+  @media (max-width: 80rem) { .vj-cols { grid-template-columns: 18.5rem minmax(0, 1fr); } .vj-right { grid-column: 1 / -1; display: grid !important; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); } }
+  @media (max-width: 56rem) { .vj-cols { grid-template-columns: minmax(0, 1fr); } }
+  .vj-left, .vj-right, .vj-main { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
+
+  /* Hero (left) */
+  .vj-hero { position: relative; overflow: hidden; min-height: 21rem; justify-content: space-between;
+    background:
+      radial-gradient(18rem 14rem at 85% 30%, color-mix(in srgb, #FFE08A 70%, transparent), transparent 70%),
+      radial-gradient(16rem 14rem at 10% 90%, color-mix(in srgb, #FFB27A 45%, transparent), transparent 70%),
+      var(--vj-card); }
+  .vj-hero-tag { display: inline-flex; align-items: center; gap: .45rem; font-size: 12px; font-weight: 500; }
+  .vj-hero-tag .vj-logo { width: 24px; height: 24px; border-radius: 50%; }
+  .vj-hero-title { font-size: 1.45rem; font-weight: 400; line-height: 1.2; letter-spacing: -.02em; max-width: 14ch; }
+  .vj-hero-title strong { font-weight: 600; }
+  .vj-keys { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .vj-key { font: inherit; display: inline-flex; align-items: center; gap: 6px; min-height: 2rem; padding: 0 .7rem; border-radius: 999px; cursor: pointer; font-size: 12px; background: color-mix(in srgb, var(--color-panel) 80%, transparent); color: var(--color-fg); border: 1px solid var(--vj-line); transition: background var(--cds-dur-slow), border-color var(--cds-dur-slow), color var(--cds-dur-slow); }
+  .vj-key:hover { border-color: var(--vj-violet); }
+  .vj-key .vj-dk { width: 7px; height: 7px; border-radius: 50%; background: var(--vj-violet); }
+  .vj-key[aria-pressed="true"] { background: var(--vj-violet); color: var(--vj-violet-ink); border-color: var(--vj-violet); }
+  .vj-key[aria-pressed="true"] .vj-dk { background: var(--vj-violet-ink); }
+  .vj-key .vj-n { opacity: .7; font-variant-numeric: tabular-nums; }
+  .vj-ask { display: flex; align-items: center; gap: .5rem; background: var(--color-panel); border: 1px solid var(--vj-line); border-radius: 999px; padding: .25rem .3rem .25rem .9rem; }
+  .vj-ask input { flex: 1; min-width: 0; border: 0; background: transparent; font: inherit; font-size: 13px; color: var(--color-fg); min-height: 2.2rem; outline: none; }
+  .vj-ask .vj-round { width: 32px; height: 32px; border-radius: 50%; background: var(--vj-orange); color: #fff; display: grid; place-items: center; flex: none; }
+  .vj-ask .vj-round svg { width: 14px; height: 14px; }
+
+  /* Ratio card */
+  .vj-ratio-big { font-size: 2.4rem; font-weight: 300; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; min-height: 1em; }
+  .vj-ratio-big small { font-size: 1rem; }
+  .vj-bars { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+  .vj-bar-l { font-size: 11px; color: var(--color-fg-muted); margin-bottom: 4px; }
+  .vj-stripe { height: 30px; border-radius: 8px; min-height: 30px; }
+
+  /* Filters */
+  .vj-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .vj-field > label { font-size: 11px; color: var(--color-fg-muted); font-weight: 500; }
+  .vj-field input, .vj-field select { font: inherit; font-size: 13px; color: var(--color-fg); background: var(--color-panel); border: 1px solid var(--vj-line); border-radius: var(--vj-r-sm); padding: 0 .7rem; min-height: 2.4rem; width: 100%; box-sizing: border-box; min-width: 0; }
+  .vj-field input:focus, .vj-field select:focus { border-color: var(--vj-orange); }
+  .vj-pair { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+  .vj-link { font: inherit; font-size: 12px; color: var(--vj-orange); background: none; border: 0; padding: 0; cursor: pointer; min-height: 1.75rem; font-weight: 500; }
+
+  /* Main header */
+  .vj-welcome { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 1rem; }
+  .vj-kpis { display: flex; gap: 1.6rem; }
+  .vj-kpi { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+  .vj-kpi .vj-big { font-size: 2.6rem; font-weight: 300; letter-spacing: -.035em; line-height: 1; font-variant-numeric: tabular-nums; min-height: 1em; }
+  .vj-kpi .vj-lbl { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--color-fg-muted); }
+  .vj-kpi .vj-lbl::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--vj-orange); }
+  .vj-kpi.vj-kpi-v .vj-lbl::before { background: var(--vj-violet); }
+
+  /* Tabs + search */
+  .vj-toolbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .6rem; }
+  .vj-tabs { display: flex; flex-wrap: wrap; gap: .35rem; }
+  .vj-tab { font: inherit; font-size: 12px; min-height: 2.1rem; padding: 0 .9rem; border-radius: 999px; border: 1px solid var(--vj-line); background: var(--color-panel); color: var(--color-fg-muted); cursor: pointer; transition: background var(--cds-dur-slow), color var(--cds-dur-slow); }
+  .vj-tab:hover { color: var(--color-fg); }
+  .vj-tab[aria-pressed="true"] { background: var(--color-fg); color: var(--color-bg); border-color: var(--color-fg); font-weight: 500; }
+  .vj-search { display: flex; align-items: center; gap: .4rem; background: var(--color-panel); border: 1px solid var(--vj-line); border-radius: 999px; padding: 0 .4rem 0 .8rem; min-width: min(100%, 15rem); }
+  .vj-search svg { width: 14px; height: 14px; color: var(--color-fg-muted); flex: none; }
+  .vj-search input { border: 0; background: transparent; font: inherit; font-size: 12px; color: var(--color-fg); min-height: 2.1rem; width: 100%; outline: none; }
+  .vj-search select { border: 0; background: transparent; font: inherit; font-size: 12px; color: var(--color-fg-muted); min-height: 2.1rem; cursor: pointer; }
+
+  /* Job table */
+  .vj-tbl { display: flex; flex-direction: column; min-height: 16rem; }
+  .vj-thead, .vj-tr { display: grid; grid-template-columns: minmax(13rem, 2.3fr) 5.2rem minmax(8rem, 1.3fr) minmax(8rem, 1.2fr) 6.8rem 2rem; gap: .75rem; align-items: center; padding: .55rem .6rem; }
+  .vj-thead { font-size: 11px; color: var(--color-fg-muted); border-bottom: 1px solid var(--vj-line); }
+  .vj-rowwrap { border-bottom: 1px solid var(--vj-line); }
+  .vj-rowwrap:last-child { border-bottom: 0; }
+  .vj-rowwrap > summary { list-style: none; cursor: pointer; border-radius: 12px; transition: background var(--cds-dur-slow); }
+  .vj-rowwrap > summary::-webkit-details-marker { display: none; }
+  .vj-rowwrap > summary:hover { background: var(--vj-soft); }
+  .vj-rowwrap[open] > summary { background: var(--vj-soft); }
+  .vj-out .vj-who h3 { color: var(--color-fg-muted); }
+  .vj-who { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+  .vj-av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 600; color: #fff; flex: none; }
+  .vj-who > div { min-width: 0; }
+  .vj-who h3 { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vj-sub { font-size: 11px; color: var(--color-fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vj-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; padding: 3px 9px; border-radius: 999px; width: max-content; }
+  .vj-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .vj-pill.g { color: var(--vj-green); background: color-mix(in srgb, var(--vj-green) 12%, transparent); }
+  .vj-pill.a { color: var(--vj-amber); background: color-mix(in srgb, var(--vj-amber) 13%, transparent); }
+  .vj-pill.r { color: var(--vj-red); background: color-mix(in srgb, var(--vj-red) 11%, transparent); }
+  .vj-pay { font-size: 13px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vj-pay.nd { color: var(--color-fg-muted); }
+  .vj-place { font-size: 12px; min-width: 0; }
+  .vj-place .vj-sub { display: block; }
+  .vj-mode { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--color-fg-muted); white-space: nowrap; }
+  .vj-mode svg { width: 12px; height: 12px; }
+  .vj-act { display: grid; place-items: center; color: var(--color-fg-muted); }
+  .vj-act svg { width: 16px; height: 16px; transition: transform var(--cds-dur-slow); }
+  .vj-rowwrap[open] .vj-act svg { transform: rotate(180deg); }
+  .vj-detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: .9rem 1.5rem; padding: .4rem .6rem 1rem 3.2rem; }
+  @media (max-width: 40rem) { .vj-detail { padding-left: .6rem; } }
+  .vj-dblock { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .vj-dlabel { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--color-fg-muted); font-weight: 500; }
+  .vj-line { font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+  .vj-line.m { color: var(--color-fg-muted); }
+  .vj-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+  .vj-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; line-height: 1; padding: 5px 9px; border-radius: 999px; white-space: nowrap; }
+  .vj-tag svg { width: 10px; height: 10px; }
+  .vj-tag.pref { background: var(--vj-violet); color: var(--vj-violet-ink); font-weight: 500; }
+  .vj-tag.caution { color: var(--vj-red); border: 1px solid color-mix(in srgb, var(--vj-red) 45%, transparent); }
+  .vj-tag.info { color: var(--color-fg-muted); border: 1px solid var(--vj-line); }
+  .vj-tag.ok { color: var(--vj-green); border: 1px solid color-mix(in srgb, var(--vj-green) 45%, transparent); }
+  .vj-go { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 2.2rem; padding: 0 .95rem; border-radius: 999px; background: var(--color-fg); color: var(--color-bg); text-decoration: none; font-size: 12px; font-weight: 500; }
+  .vj-go:hover { opacity: .88; }
+  .vj-more-row { display: flex; justify-content: center; padding-top: .4rem; }
+  .vj-more { font: inherit; font-size: 12px; min-height: 2.3rem; padding: 0 1.1rem; border-radius: 999px; border: 1px solid var(--vj-line); background: var(--color-panel); color: var(--color-fg); cursor: pointer; }
+  .vj-empty { color: var(--color-fg-muted); padding: 2rem .6rem; font-size: 13px; }
+  @media (max-width: 46rem) {
+    .vj-thead { display: none; }
+    .vj-tr { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "who score" "pay pay" "place mode"; row-gap: .4rem; }
+    .vj-tr .c-who { grid-area: who; } .vj-tr .c-score { grid-area: score; } .vj-tr .c-pay { grid-area: pay; } .vj-tr .c-place { grid-area: place; } .vj-tr .c-mode { grid-area: mode; } .vj-tr .vj-act { display: none; }
+  }
+
+  /* Right column */
+  .vj-gauge { position: relative; min-height: 9.5rem; display: grid; place-items: end center; }
+  .vj-gauge-num { position: absolute; bottom: 6px; left: 0; right: 0; text-align: center; }
+  .vj-gauge-num b { display: block; font-size: 2rem; font-weight: 300; letter-spacing: -.03em; line-height: 1; }
+  .vj-seg { display: flex; gap: 4px; height: 8px; min-height: 8px; }
+  .vj-seg span { border-radius: 4px; }
+  .vj-legend { display: flex; flex-direction: column; gap: 6px; }
+  .vj-leg { display: grid; grid-template-columns: auto 1fr auto; gap: .5rem; align-items: center; font-size: 12px; }
+  .vj-leg i { width: 8px; height: 8px; border-radius: 50%; display: block; }
+  .vj-leg b { font-weight: 500; }
+  .vj-list { display: flex; flex-direction: column; gap: 2px; }
+  .vj-li { font: inherit; display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .5rem .6rem; border-radius: 10px; background: transparent; border: 0; color: var(--color-fg); font-size: 12px; cursor: pointer; text-align: left; min-height: 2.25rem; }
+  .vj-li:hover, .vj-li[aria-pressed="true"] { background: var(--vj-soft); }
+  .vj-li[aria-pressed="true"] { font-weight: 500; }
+  .vj-chip { font-size: 11px; font-variant-numeric: tabular-nums; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--vj-line); color: var(--color-fg-muted); }
+  .vj-cats { display: grid; grid-template-columns: 1fr; gap: .5rem; }
+  .vj-cat { font: inherit; text-align: left; display: flex; flex-direction: column; gap: 4px; padding: .75rem .8rem; border-radius: 14px; border: 1px solid var(--vj-line); background: var(--color-panel); color: var(--color-fg); cursor: pointer; transition: border-color var(--cds-dur-slow); }
+  .vj-cat:hover, .vj-cat[aria-pressed="true"] { border-color: var(--vj-orange); }
+  .vj-cat-top { display: flex; justify-content: space-between; gap: .5rem; align-items: center; }
+  .vj-cat-name { font-size: 13px; font-weight: 500; }
+  .vj-cat-pay { font-size: 12px; color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
+
+  /* Bottom */
+  .vj-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1rem; }
+  .vj-chart { position: relative; min-height: 16rem; }
+  .vj-tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); max-width: 16rem; z-index: 2; }
+  .vj-tip .vj-tk { color: var(--cds-text-secondary); }
+  .vj-method { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: 1rem 1.75rem; }
+  .vj-method div { display: flex; flex-direction: column; gap: 4px; font-size: 12px; line-height: 1.6; color: var(--color-fg-muted); }
+  .vj-method h3 { color: var(--color-fg); font-size: 13px; }
+  .vj-method strong { color: var(--color-fg); font-weight: 500; }
+
+  [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+  [data-dash-source-state=empty] { color: transparent; }
+  .vj-fail { display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--color-fg-muted); font-size: 12px; min-height: inherit; }
+  .vj-fail::before { content: ""; width: .375rem; height: .375rem; border-radius: 50%; background: var(--color-bad); }
+  @media (prefers-reduced-motion: no-preference) {
+    .vj-rowwrap { animation: vj-in var(--cds-dur-slow) var(--cds-ease-out) both; }
+    @keyframes vj-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  }
+</style>
+</head>
+<body>
+<div class="vj-wrap">
+
+<div class="vj">
+  <header class="vj-top" id="overview">
+    <div class="vj-brand"><span class="vj-logo" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.2 4.4.3-3.4 2.8 1.1 4.3L8 10.8l-3.7 2.3 1.1-4.3L2 6l4.4-.3z" fill="currentColor"/></svg></span>Vishakha's Toronto job board</div>
+    <div class="vj-top-right">
+      <div class="vj-date"><span class="vj-date-num">04</span><span class="vj-date-txt">November<br>2026 refresh</span></div>
+      <button class="vj-cta vj-top-matches" type="button">Show top matches <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
+  </header>
+
+  <div class="vj-cols">
+    <aside class="vj-left" aria-label="Search and filters">
+      <section class="vj-card vj-hero" id="preference-tags">
+        <div class="vj-card-head">
+          <span class="vj-hero-tag"><span class="vj-logo" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 1.5l1.6 4.2 4.4.3-3.4 2.8 1.1 4.3L8 10.8l-3.7 2.3 1.1-4.3L2 6l4.4-.3z" fill="currentColor"/></svg></span>Fit finder</span>
+        </div>
+        <p class="vj-hero-title">Ready to find her <strong>best-fit roles</strong> in Toronto?</p>
+        <div class="vj-keys" role="group" aria-label="Filter by preference tag">
+          <button class="vj-key" type="button" data-tag="top" aria-pressed="false"><span class="vj-dk" aria-hidden="true"></span>Top match <span class="vj-n" data-draw="n-top" data-source="jobs">—</span></button>
+          <button class="vj-key" type="button" data-tag="nocomm" aria-pressed="false"><span class="vj-dk" aria-hidden="true"></span>No commission <span class="vj-n" data-draw="n-nocomm" data-source="jobs">—</span></button>
+          <button class="vj-key" type="button" data-tag="salary" aria-pressed="false"><span class="vj-dk" aria-hidden="true"></span>Salary posted <span class="vj-n" data-draw="n-salary" data-source="jobs">—</span></button>
+          <button class="vj-key" type="button" data-tag="flex" aria-pressed="false"><span class="vj-dk" aria-hidden="true"></span>Hybrid or remote <span class="vj-n" data-draw="n-flex" data-source="jobs">—</span></button>
+          <button class="vj-key" type="button" data-tag="above" aria-pressed="false"><span class="vj-dk" aria-hidden="true"></span>Pays above median <span class="vj-n" data-draw="n-above" data-source="jobs">—</span></button>
+          <button class="vj-key" type="button" data-tag="health" aria-pressed="false"><span class="vj-dk" aria-hidden="true"></span>Health &amp; dental <span class="vj-n" data-draw="n-health" data-source="jobs">—</span></button>
+          <button class="vj-key" type="button" data-tag="bonus" aria-pressed="false"><span class="vj-dk" aria-hidden="true"></span>Bonus <span class="vj-n" data-draw="n-bonus" data-source="jobs">—</span></button>
+          <button class="vj-key" type="button" data-tag="level" aria-pressed="false"><span class="vj-dk" aria-hidden="true"></span>Right level <span class="vj-n" data-draw="n-level" data-source="jobs">—</span></button>
+        </div>
+        <label class="vj-ask" for="vj-q"><input id="vj-q" class="vj-q" type="search" placeholder="Search a role, company or city…"><span class="vj-round" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM14 14l-3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span></label>
+      </section>
+
+      <section class="vj-card" id="salary-ratio">
+        <div class="vj-card-head"><h2>Salary disclosed</h2><span class="vj-muted">Share of openings</span></div>
+        <p class="vj-ratio-big dash-skeleton" data-draw="ratio" data-source="summary">—</p>
+        <div class="vj-bars">
+          <div><p class="vj-bar-l">Disclosed</p><div class="vj-stripe" data-draw="stripe-yes" data-source="summary"></div></div>
+          <div><p class="vj-bar-l">Not disclosed</p><div class="vj-stripe" data-draw="stripe-no" data-source="summary"></div></div>
+        </div>
+      </section>
+
+      <section class="vj-card" id="filters" aria-label="Filters">
+        <div class="vj-card-head"><h2>Filters</h2><button class="vj-link vj-reset" type="button">Reset</button></div>
+        <div class="vj-pair">
+          <div class="vj-field"><label for="vj-min">Min / year (CAD)</label><input id="vj-min" class="vj-min" type="number" min="0" step="5000" inputmode="numeric" placeholder="70000"></div>
+          <div class="vj-field"><label for="vj-max">Max / year (CAD)</label><input id="vj-max" class="vj-max" type="number" min="0" step="5000" inputmode="numeric" placeholder="120000"></div>
+        </div>
+        <div class="vj-field"><label for="vj-freq">Pay frequency</label>
+          <select id="vj-freq" class="vj-freq"><option value="all">Any frequency</option><option value="Annual">Annual salary</option><option value="Hourly">Hourly pay</option><option value="Monthly">Monthly pay</option></select></div>
+        <div class="vj-field"><label for="vj-mode">Work arrangement</label>
+          <select id="vj-mode" class="vj-mode-sel"><option value="">Any arrangement</option><option value="Hybrid">Hybrid</option><option value="Remote (Canada)">Remote (Canada)</option><option value="On-site">On-site</option><option value="Not stated">Not stated in posting</option></select></div>
+        <div class="vj-field"><label for="vj-place">Place of work</label><select id="vj-place" data-draw="placesel" data-source="jobs"></select></div>
+        <div class="vj-field"><label for="vj-cat">Job category</label><select id="vj-cat" data-draw="catsel" data-source="by_category"></select></div>
+        <div class="vj-field"><label for="vj-src">Found on</label>
+          <select id="vj-src" class="vj-src-sel"><option value="">All sources</option><option value="employer">Employer career sites</option><option value="Job Bank">Job Bank</option><option value="Indeed">Indeed</option><option value="other">Other job boards</option></select></div>
+        <p class="vj-muted">Salary filters use the yearly equivalent. Jobs without a published salary stay in the list.</p>
+      </section>
+    </aside>
+
+    <main class="vj-main" id="jobs" aria-label="Job openings">
+      <section class="vj-card">
+        <div class="vj-welcome">
+          <div>
+            <h1>Welcome back, Vishakha</h1>
+            <p class="vj-muted"><b data-draw="t-total" data-source="summary" data-field="total">—</b> Toronto-area openings from employer sites, Job Bank and Indeed. Tap a row for pay details and the posting.</p>
+          </div>
+          <div class="vj-kpis" aria-label="Headline figures">
+            <div class="vj-kpi"><span class="vj-big dash-skeleton" data-draw="k-total" data-source="summary" data-field="total">—</span><span class="vj-lbl">Openings</span></div>
+            <div class="vj-kpi"><span class="vj-big dash-skeleton" data-draw="k-short" data-source="summary" data-field="shortlisted">—</span><span class="vj-lbl">Shortlisted</span></div>
+            <div class="vj-kpi vj-kpi-v"><span class="vj-big dash-skeleton" data-draw="k-strong" data-source="jobs">—</span><span class="vj-lbl">Strong fits</span></div>
+          </div>
+        </div>
+
+        <div class="vj-toolbar">
+          <div class="vj-tabs" role="group" aria-label="View">
+            <button class="vj-tab" type="button" data-view="short" aria-pressed="true">Shortlist</button>
+            <button class="vj-tab" type="button" data-view="disc" aria-pressed="false">Salary disclosed</button>
+            <button class="vj-tab" type="button" data-view="nodisc" aria-pressed="false">Not disclosed</button>
+            <button class="vj-tab" type="button" data-view="out" aria-pressed="false">Screened out</button>
+            <button class="vj-tab" type="button" data-view="all" aria-pressed="false">All</button>
+          </div>
+          <div class="vj-search">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M4.5 8h7M6.5 12h3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+            <label class="vj-muted" for="vj-sort">Sort</label>
+            <select id="vj-sort" class="vj-sort"><option value="match">Best match</option><option value="tags">Most violet tags</option><option value="pay-desc">Salary, high to low</option><option value="pay-asc">Salary, low to high</option></select>
+          </div>
+        </div>
+
+        <div class="vj-tbl" role="table" aria-label="Job openings">
+          <div class="vj-thead" role="row"><span role="columnheader">Role</span><span role="columnheader">Match</span><span role="columnheader">Salary (CAD)</span><span role="columnheader">Place of work</span><span role="columnheader">Arrangement</span><span role="columnheader"></span></div>
+          <div data-draw="rows" data-source="jobs">—</div>
+        </div>
+        <p class="vj-muted"><b data-draw="shown" data-source="jobs">—</b> openings match. Violet tags mark what fits her preferences; red outlines mark things to check.</p>
+        <div class="vj-more-row"><button class="vj-more" type="button" hidden>Show more openings</button></div>
+      </section>
+    </main>
+
+    <aside class="vj-right" aria-label="Market overview">
+      <section class="vj-card" id="shortlist-rate">
+        <div class="vj-card-head"><h2>Shortlist rate</h2><span class="vj-muted">Pass the sales screen</span></div>
+        <div class="vj-gauge" data-draw="gauge" data-source="summary"></div>
+      </section>
+
+      <section class="vj-card" id="sources">
+        <div class="vj-card-head"><h2>Where jobs came from</h2></div>
+        <div class="vj-seg" data-draw="srcbar" data-source="jobs"></div>
+        <div class="vj-legend" data-draw="srcleg" data-source="jobs"></div>
+      </section>
+
+      <section class="vj-card" id="places">
+        <div class="vj-card-head"><h2>Top places of work</h2><span class="vj-muted">Tap to filter</span></div>
+        <div class="vj-list" data-draw="places" data-source="jobs"></div>
+      </section>
+
+      <section class="vj-card" id="categories">
+        <div class="vj-card-head"><h2>Roles by category</h2><span class="vj-muted">Yearly base range</span></div>
+        <div class="vj-cats" data-draw="cats" data-source="by_category"></div>
+      </section>
+    </aside>
+  </div>
+
+  <div class="vj-grid2" id="compensation">
+    <section class="vj-card" id="pay-chart">
+      <div class="vj-card-head"><h2>Advertised yearly base ranges</h2></div>
+      <p class="vj-muted">Each line is one disclosed range, low to high; the orange tick is the category median midpoint. Hourly, monthly and on-target-earnings roles are left out; grey lines are screened-out sales roles.</p>
+      <div class="vj-chart dash-skeleton" data-draw="paychart" data-source="jobs by_category"></div>
+    </section>
+    <section class="vj-card" id="method">
+      <div class="vj-card-head"><h2>How this board works</h2></div>
+      <div class="vj-method">
+        <div><h3>Sources</h3><p>Employer career sites (Greenhouse, Ashby, Lever, Workday feeds), Canada's Job Bank, and Indeed through the Indeed connector and Job Bank. Each row says where its salary came from; board salaries are what the employer advertised there and are not cross-checked on the employer's site.</p></div>
+        <div><h3>Salary</h3><p>Third-party averages (Glassdoor, Payscale) appear only in a row's details and are never shown as its salary. Hourly pay is converted at the posted weekly hours × 52, or 37.5 hours when none are stated. No salary is shown as "Not disclosed".</p></div>
+        <div><h3>Violet tags</h3><p><strong>Top match</strong> means a score of <b data-draw="th-match">—</b> or more. <strong>Pays above median</strong> means at least <b data-draw="th-above">—</b> above its category median. <strong>No commission</strong>, <strong>Hybrid or remote</strong>, <strong>Health &amp; dental</strong>, <strong>Bonus</strong> and <strong>Right level</strong> come from the posting text.</p></div>
+        <div><h3>Screen and score</h3><p>Commission roles are scored for sales intensity; High (60+) is screened out but stays under "Screened out". The match score weighs category fit, resume skills, location and level. Salary does not change the score.</p></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+</div>
+<p class="vj-foot-note">Data: employer career sites, Canada's Job Bank and Indeed, pulled 4 Nov 2026. Salaries are as advertised; see the Method notes above.</p>
+<script>
+  window.vj = window.vj || {};
+  const V = window.vj;
+  V.bool = (v) => v === true || v === 'true' || v === 1 || v === '1';
+  V.num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+  V.fmt0 = d3.format('$,.0f');
+  V.fmt2 = d3.format('$,.2f');
+  V.k = (v) => `$${d3.format(',.0f')(v / 1000)}k`;
+  V.mid = (r) => (V.num(r.annual_min) + V.num(r.annual_max)) / 2;
+  V.isBase = (r) => V.bool(r.salary_disclosed) && r.frequency === 'Annual' && !String(r.pay_basis || '').includes('OTE');
+  V.TH = { match: 80, above: 10, strong: 5, page: 25 };
+  V.defaults = { q: '', cat: '', view: 'short', freq: 'all', minA: null, maxA: null, mode: '', sort: 'match', tags: [], limit: V.TH.page, place: '', src: '' };
+  V.board = (r) => (['Greenhouse', 'Ashby', 'Lever', 'Workday'].includes(r.ats) ? 'employer' : r.ats);
+  V.SRC = [
+    { key: 'employer', label: 'Employer career sites', color: '#F26B3A' },
+    { key: 'Job Bank', label: 'Job Bank', color: '#FDB022' },
+    { key: 'Indeed', label: 'Indeed', color: '#12B76A' },
+    { key: 'other', label: 'Other job boards', color: '#7A5AF8' },
+  ];
+  V.srcKey = (r) => { const b = V.board(r); return ['employer', 'Job Bank', 'Indeed'].includes(b) ? b : 'other'; };
+
+  V.PREF = [
+    { key: 'top', label: 'Top match', test: (r) => V.num(r.match) >= V.TH.match },
+    { key: 'salary', label: 'Salary posted', test: (r) => V.bool(r.salary_disclosed) },
+    { key: 'above', label: 'Pays above median', test: (r) => r.vs_median_pct !== null && r.vs_median_pct !== undefined && V.num(r.vs_median_pct) >= V.TH.above },
+    { key: 'nocomm', label: 'No commission', test: (r) => !V.bool(r.commission_flag) && r.sales_level === 'Low' },
+    { key: 'flex', label: 'Hybrid or remote', test: (r) => /^(Hybrid|Remote)/.test(String(r.work_mode)) },
+    { key: 'health', label: 'Health & dental', test: (r) => String(r.benefits || '').includes('Health & dental') },
+    { key: 'bonus', label: 'Bonus', test: (r) => !!r.bonus },
+    { key: 'level', label: 'Right level', test: (r) => r.level_fit === 'Good level' },
+  ];
+  V.prefsOf = (r) => V.PREF.filter((t) => t.test(r));
+  V.CAUTION = [
+    { label: () => 'Commission', test: (r) => V.bool(r.commission_flag) },
+    { label: (r) => `Sales intensity: ${r.sales_level}`, test: (r) => r.sales_level && r.sales_level !== 'Low' },
+    { label: (r) => `Low for category (${r.vs_median_pct}%)`, test: (r) => r.pay_flag === 'Low for category' },
+    { label: () => 'On-site only', test: (r) => r.work_mode === 'On-site' },
+    { label: () => 'Below her level', test: (r) => r.level_fit === 'Below her level' },
+  ];
+
+  dash.calc('summary', {
+    title: 'Board totals',
+    description: 'Counts of openings, shortlisted roles, disclosed salaries and commission roles, plus the median yearly base midpoint on the shortlist.',
+    inputs: ['jobs'],
+    fn: (jobs) => {
+      const yes = (v) => v === true || v === 'true';
+      const mids = jobs.filter((r) => yes(r.shortlist) && yes(r.salary_disclosed) && r.frequency === 'Annual' && !String(r.pay_basis).includes('OTE'))
+        .map((r) => (Number(r.annual_min) + Number(r.annual_max)) / 2).sort((a, b) => a - b);
+      const m = mids.length ? (mids.length % 2 ? mids[(mids.length - 1) / 2] : (mids[mids.length / 2 - 1] + mids[mids.length / 2]) / 2) : null;
+      return [{
+        total: jobs.length,
+        shortlisted: jobs.filter((r) => yes(r.shortlist)).length,
+        disclosed: jobs.filter((r) => yes(r.salary_disclosed)).length,
+        median_mid: m === null ? null : Math.round(m),
+        commission: jobs.filter((r) => yes(r.commission_flag)).length,
+      }];
+    },
+  });
+
+  dash.calc('by_category', {
+    title: 'Pay by job category',
+    description: 'Per category: roles, roles with a disclosed salary, median midpoint of disclosed yearly base ranges, lowest minimum and highest maximum.',
+    inputs: ['jobs'],
+    fn: (jobs) => {
+      const yes = (v) => v === true || v === 'true';
+      const groups = d3.group(jobs, (r) => r.category);
+      return Array.from(groups, ([category, rows]) => {
+        const base = rows.filter((r) => yes(r.salary_disclosed) && r.frequency === 'Annual' && !String(r.pay_basis).includes('OTE'));
+        const mids = base.map((r) => (Number(r.annual_min) + Number(r.annual_max)) / 2);
+        return {
+          category,
+          roles: rows.length,
+          disclosed: rows.filter((r) => yes(r.salary_disclosed)).length,
+          median_mid: mids.length >= 3 ? Math.round(d3.median(mids)) : null,
+          low: base.length ? d3.min(base, (r) => Number(r.annual_min)) : null,
+          high: base.length ? d3.max(base, (r) => Number(r.annual_max)) : null,
+        };
+      }).sort((a, b) => b.roles - a.roles);
+    },
+  });
+
+  dash.setParams(V.defaults);
+
+  // ---- controls ----
+  const each = (sel, fn) => document.querySelectorAll(sel).forEach(fn);
+  const set = (o) => dash.setParams({ ...o, limit: V.TH.page });
+  each('.vj-q', (el) => el.addEventListener('input', () => set({ q: el.value })));
+  each('.vj-mode-sel', (el) => el.addEventListener('change', () => set({ mode: el.value })));
+  each('.vj-src-sel', (el) => el.addEventListener('change', () => set({ src: el.value })));
+  each('.vj-sort', (el) => el.addEventListener('change', () => set({ sort: el.value })));
+  each('.vj-tab', (el) => el.addEventListener('click', () => set({ view: el.dataset.view })));
+  each('.vj-freq', (el) => el.addEventListener('change', () => set({ freq: el.value })));
+  each('.vj-min', (el) => el.addEventListener('change', () => set({ minA: el.value !== '' && el.validity.valid ? Number(el.value) : null })));
+  each('.vj-max', (el) => el.addEventListener('change', () => set({ maxA: el.value !== '' && el.validity.valid ? Number(el.value) : null })));
+  each('.vj-reset', (el) => el.addEventListener('click', () => { dash.resetParams(); dash.setParams(V.defaults); }));
+  each('.vj-top-matches', (el) => el.addEventListener('click', () => { set({ view: 'short', tags: ['top'], sort: 'match' }); const t = document.getElementById('jobs'); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+  each('.vj-more', (el) => el.addEventListener('click', () => dash.setParams({ limit: (V.num(dash.params().limit) || V.TH.page) + V.TH.page })));
+  each('.vj-key', (el) => el.addEventListener('click', () => {
+    const cur = Array.isArray(dash.params().tags) ? dash.params().tags.slice() : [];
+    const k = el.dataset.tag, i = cur.indexOf(k);
+    if (i >= 0) cur.splice(i, 1); else cur.push(k);
+    set({ tags: cur });
+  }));
+
+  V.cityOf = (r) => String(r.place || '').replace(/ \(remote option\)$/, '').split(',')[0].trim();
+
+  // ---- filtering ----
+  V.filtered = (rows) => {
+    const p = dash.params();
+    const q = String(p.q || '').trim().toLowerCase();
+    const minA = V.num(p.minA), maxA = V.num(p.maxA);
+    const tags = Array.isArray(p.tags) ? p.tags : [];
+    const view = p.view || 'short';
+    let out = rows.filter((r) => {
+      const disc = V.bool(r.salary_disclosed), short = V.bool(r.shortlist);
+      if (view === 'short' && !short) return false;
+      if (view === 'out' && short) return false;
+      if (view === 'disc' && (!disc || !short)) return false;
+      if (view === 'nodisc' && (disc || !short)) return false;
+      if (q && !(`${r.title} ${r.company} ${r.location} ${r.place}`.toLowerCase().includes(q))) return false;
+      if (p.cat && r.category !== p.cat) return false;
+      if (p.mode && !String(r.work_mode).startsWith(p.mode)) return false;
+      if (p.place && V.cityOf(r) !== p.place) return false;
+      if (p.src && V.srcKey(r) !== p.src) return false;
+      if (p.freq && p.freq !== 'all' && (!disc || r.frequency !== p.freq)) return false;
+      if (disc && minA !== null && V.num(r.annual_max) < minA) return false;
+      if (disc && maxA !== null && V.num(r.annual_min) > maxA) return false;
+      if (tags.length) { const have = V.prefsOf(r).map((t) => t.key); if (!tags.every((k) => have.includes(k))) return false; }
+      return true;
+    });
+    const pay = (r) => (V.bool(r.salary_disclosed) ? V.mid(r) : null);
+    const byMatch = (a, b) => V.num(b.match) - V.num(a.match);
+    if (p.sort === 'pay-desc' || p.sort === 'pay-asc') {
+      const dir = p.sort === 'pay-desc' ? -1 : 1;
+      out = out.slice().sort((a, b) => { const x = pay(a), y = pay(b); if (x === null && y === null) return byMatch(a, b); if (x === null) return 1; if (y === null) return -1; return dir * (x - y); });
+    } else if (p.sort === 'tags') out = out.slice().sort((a, b) => (V.prefsOf(b).length - V.prefsOf(a).length) || byMatch(a, b));
+    else out = out.slice().sort(byMatch);
+    return out;
+  };
+
+  dash.onData(() => {
+    const p = dash.params();
+    each('.vj-q', (el) => { if (el !== document.activeElement) el.value = p.q ?? ''; });
+    each('.vj-mode-sel', (el) => { el.value = p.mode ?? ''; });
+    each('.vj-src-sel', (el) => { el.value = p.src ?? ''; });
+    each('.vj-sort', (el) => { el.value = p.sort ?? 'match'; });
+    each('.vj-tab', (el) => el.setAttribute('aria-pressed', (p.view ?? 'short') === el.dataset.view ? 'true' : 'false'));
+    each('.vj-freq', (el) => { el.value = p.freq ?? 'all'; });
+    each('.vj-min', (el) => { if (el !== document.activeElement) el.value = p.minA ?? ''; });
+    each('.vj-max', (el) => { if (el !== document.activeElement) el.value = p.maxA ?? ''; });
+    const tags = Array.isArray(p.tags) ? p.tags : [];
+    each('.vj-key', (el) => el.setAttribute('aria-pressed', tags.includes(el.dataset.tag) ? 'true' : 'false'));
+    const j = dash.data('jobs');
+    const total = j.status === 'ok' ? V.filtered(j.data).length : 0;
+    each('.vj-more', (el) => { el.hidden = total <= (V.num(p.limit) || V.TH.page); });
+    const st = dash.data('summary').status;
+    each('.dash-skeleton', (el) => { if (st !== 'loading') el.classList.remove('dash-skeleton'); });
+  });
+
+  // ---- small drawings ----
+  const tile = (name, field, f) => dash.draw(name, (el) => {
+    const s = dash.data('summary');
+    if (s.status !== 'ok' || !s.data.length) { el.textContent = '—'; return; }
+    const v = s.data[0][field];
+    el.textContent = v === null || v === undefined ? '—' : (f ? f(v) : d3.format(',')(v));
+  });
+  tile('t-total', 'total'); tile('k-total', 'total'); tile('k-short', 'shortlisted');
+  dash.draw('k-strong', (el) => {
+    const j = dash.data('jobs');
+    el.textContent = j.status === 'ok' ? d3.format(',')(j.data.filter((r) => V.bool(r.shortlist) && V.prefsOf(r).length >= V.TH.strong).length) : '—';
+  });
+  dash.draw('th-match', (el) => { el.textContent = `${V.TH.match}/100`; });
+  dash.draw('th-above', (el) => { el.textContent = `${V.TH.above}%`; });
+  V.PREF.forEach((t) => dash.draw('n-' + t.key, (el) => {
+    const j = dash.data('jobs');
+    el.textContent = j.status === 'ok' ? d3.format(',')(j.data.filter((r) => V.bool(r.shortlist) && t.test(r)).length) : '—';
+  }));
+  dash.draw('shown', (el) => {
+    const j = dash.data('jobs');
+    el.textContent = j.status === 'ok' ? d3.format(',')(V.filtered(j.data).length) : '—';
+  });
+  dash.draw('ratio', (el) => {
+    const s = dash.data('summary');
+    if (s.status !== 'ok' || !s.data.length) { el.textContent = '—'; return; }
+    const r = s.data[0];
+    el.replaceChildren(String(Math.round(100 * r.disclosed / r.total)), Object.assign(document.createElement('small'), { textContent: '%' }));
+  });
+  const stripe = (name, yes) => dash.draw(name, (el) => {
+    const s = dash.data('summary');
+    if (s.status !== 'ok' || !s.data.length) { el.style.background = 'var(--vj-soft)'; return; }
+    const r = s.data[0], share = (yes ? r.disclosed : r.total - r.disclosed) / r.total;
+    const c = yes ? '#FDB022' : 'color-mix(in srgb, var(--color-fg) 12%, transparent)';
+    el.style.background = `repeating-linear-gradient(90deg, ${c} 0 3px, transparent 3px 6px) left / ${Math.round(share * 100)}% 100% no-repeat, var(--vj-soft)`;
+    el.title = `${Math.round(share * 100)}% of openings`;
+  });
+  stripe('stripe-yes', true); stripe('stripe-no', false);
+
+  // ---- selects whose choices are data ----
+  dash.draw('catsel', (sel) => {
+    const g = dash.data('by_category');
+    const rows = g.status === 'ok' ? g.data : [];
+    sel.replaceChildren(new Option('All categories', ''), ...rows.map((r) => new Option(`${r.category} (${r.roles})`, r.category)));
+    sel.value = dash.params().cat ?? '';
+    sel.onchange = () => dash.setParams({ cat: sel.value, limit: V.TH.page });
+  });
+  dash.draw('placesel', (sel) => {
+    const j = dash.data('jobs');
+    const counts = j.status === 'ok' ? d3.rollups(j.data, (v) => v.length, V.cityOf).filter(([c]) => c).sort((a, b) => b[1] - a[1]) : [];
+    sel.replaceChildren(new Option('Anywhere in the GTA or remote', ''), ...counts.map(([c, n]) => new Option(`${c} (${n})`, c)));
+    sel.value = dash.params().place ?? '';
+    sel.onchange = () => dash.setParams({ place: sel.value, limit: V.TH.page });
+  });
+
+  // ---- helpers ----
+  const NS = 'http://www.w3.org/2000/svg';
+  const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+  const svg = (d, w = 14, filled) => {
+    const s = document.createElementNS(NS, 'svg'); s.setAttribute('viewBox', '0 0 16 16'); s.setAttribute('width', w); s.setAttribute('height', w); s.setAttribute('aria-hidden', 'true');
+    const p = document.createElementNS(NS, 'path'); p.setAttribute('d', d);
+    if (filled) p.setAttribute('fill', 'currentColor'); else { p.setAttribute('fill', 'none'); p.setAttribute('stroke', 'currentColor'); p.setAttribute('stroke-width', '1.5'); p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round'); }
+    s.append(p); return s;
+  };
+  const IC = {
+    hybrid: 'M2 13.5h12M3.5 13.5V6L8 2.5 12.5 6v7.5M6.5 13.5v-4h3v4',
+    remote: 'M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12zM2 8h12M8 2c1.8 1.8 2.7 3.8 2.7 6S9.8 12.2 8 14M8 2C6.2 3.8 5.3 5.8 5.3 8s.9 4.2 2.7 6',
+    onsite: 'M2.5 14V3.5L8 2v12M8 6h5.5v8M4.5 5.5h1.5M4.5 8h1.5M4.5 10.5h1.5M10 8.5h1.5M10 11h1.5M1.5 14h13',
+    none: 'M8 14A6 6 0 1 0 8 2a6 6 0 0 0 0 12zM6.3 6.2a1.8 1.8 0 1 1 2.4 1.7c-.5.2-.7.6-.7 1.1M8 11h.01',
+    check: 'M3.5 8.3l2.8 2.8 6.2-6.4', alert: 'M8 3v6M8 12v.01', chev: 'M4 6l4 4 4-4', out: 'M6 3h7v7M13 3L5 11',
+  };
+  const modeIcon = (m) => (m.startsWith('Hybrid') ? IC.hybrid : m.startsWith('Remote') ? IC.remote : m === 'On-site' ? IC.onsite : IC.none);
+  const tag = (cls, text, title, ic) => { const c = mk('span', 'vj-tag ' + cls); if (ic) c.append(svg(ic, 10)); c.append(text); if (title) c.title = title; return c; };
+  const AV = ['#F26B3A', '#F59E0B', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#14B8A6', '#EF4444'];
+  const avColor = (s) => { let h = 0; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return AV[h % AV.length]; };
+  const freqWord = { Annual: '/yr', Hourly: '/hr', Monthly: '/mo', Weekly: '/wk', Biweekly: '/2 wk' };
+  const payText = (r) => {
+    if (!V.bool(r.salary_disclosed)) return 'Not disclosed';
+    const hourly = r.frequency === 'Hourly';
+    const f = (v) => (hourly ? V.fmt2(v) : V.k(v));
+    const lo = V.num(r.sal_min), hi = V.num(r.sal_max);
+    return `${lo === hi ? f(lo) : `${f(lo)}–${f(hi).slice(1)}`} ${freqWord[r.frequency] || ''}`.trim();
+  };
+  const srcLabel = (r) => { const b = V.board(r); return b === 'employer' ? `Employer career site (${r.ats})` : b === 'Job Bank' ? 'Job Bank (Government of Canada)' : `${b}`; };
+
+  // ---- job table ----
+  dash.draw('rows', (el) => {
+    const j = dash.data('jobs');
+    if (j.status === 'error') { el.replaceChildren(mk('div', 'vj-fail', 'Failed to load')); return; }
+    if (j.status !== 'ok') { el.replaceChildren(); el.textContent = '—'; return; }
+    const all = V.filtered(j.data);
+    if (!all.length) { el.replaceChildren(mk('p', 'vj-empty', 'No openings match these filters. Clear a tag or widen the salary range.')); return; }
+    const rows = all.slice(0, V.num(dash.params().limit) || V.TH.page);
+    el.replaceChildren(...rows.map((r) => {
+      const wrap = mk('details', 'vj-rowwrap' + (V.bool(r.shortlist) ? '' : ' vj-out'));
+      const sum = mk('summary', 'vj-tr'); sum.setAttribute('role', 'row');
+      const who = mk('div', 'vj-who c-who');
+      const av = mk('span', 'vj-av', String(r.company || '?').trim().charAt(0).toUpperCase()); av.style.background = avColor(r.company);
+      const wt = mk('div'); wt.append(mk('h3', '', r.title), mk('p', 'vj-sub', r.company));
+      who.append(av, wt);
+      const m = V.num(r.match);
+      const sc = mk('span', 'vj-pill c-score ' + (m >= V.TH.match ? 'g' : m >= 60 ? 'a' : 'r'), `${m}%`); sc.title = 'Match score';
+      const pay = mk('span', 'vj-pay c-pay' + (V.bool(r.salary_disclosed) ? '' : ' nd'), payText(r));
+      const pl = mk('div', 'vj-place c-place'); pl.append(mk('span', '', r.place || r.location)); if (r.address) pl.append(mk('span', 'vj-sub', r.address));
+      const mode = mk('span', 'vj-mode c-mode'); mode.append(svg(modeIcon(r.work_mode), 12), r.work_mode === 'Not stated' ? 'Not stated' : r.work_mode.replace(' (Canada)', ''));
+      const act = mk('span', 'vj-act'); act.append(svg(IC.chev, 16));
+      sum.append(who, sc, pay, pl, mode, act);
+      wrap.append(sum);
+
+      const det = mk('div', 'vj-detail');
+      const b1 = mk('div', 'vj-dblock'); b1.append(mk('span', 'vj-dlabel', 'Fit'));
+      const prefs = V.prefsOf(r);
+      const t1 = mk('div', 'vj-tags');
+      prefs.forEach((t) => t1.append(tag('pref', t.label, 'Preferred: ' + t.label, IC.check)));
+      V.CAUTION.filter((c) => c.test(r)).forEach((c) => t1.append(tag('caution', c.label(r), r.sales_reasons || '', IC.alert)));
+      if (!prefs.length && !t1.childNodes.length) t1.append(tag('info', 'No tags'));
+      b1.append(t1, mk('p', 'vj-line m', `${r.category} · ${r.level_fit || ''}`));
+      const b2 = mk('div', 'vj-dblock'); b2.append(mk('span', 'vj-dlabel', 'Compensation'));
+      if (V.bool(r.salary_disclosed)) {
+        b2.append(mk('p', 'vj-line', `As advertised: ${r.advertised}`));
+        if (r.frequency !== 'Annual' && r.annual_min !== null) b2.append(mk('p', 'vj-line m', `≈ ${V.fmt0(V.num(r.annual_min))}${V.num(r.annual_min) !== V.num(r.annual_max) ? '–' + V.fmt0(V.num(r.annual_max)).slice(1) : ''} a year. ${r.annual_note}.`));
+        if (r.pay_basis && r.pay_basis !== 'Base salary') b2.append(mk('p', 'vj-line m', `Pay basis: ${r.pay_basis}`));
+        if (r.pay_flag || r.vs_median_pct !== null && r.vs_median_pct !== undefined) b2.append(mk('p', 'vj-line m', r.pay_flag ? `${r.pay_flag} (${r.vs_median_pct > 0 ? '+' : ''}${r.vs_median_pct}% vs median)` : `${r.vs_median_pct > 0 ? '+' : ''}${r.vs_median_pct}% vs category median`));
+        const t2 = mk('div', 'vj-tags'); t2.append(tag('ok', V.board(r) === 'employer' ? 'Employer-disclosed' : 'Employer-advertised', r.salary_status, IC.check)); b2.append(t2);
+        b2.append(mk('p', 'vj-line m', `Source: ${r.salary_source}`));
+      } else {
+        b2.append(mk('p', 'vj-line', 'Salary: Not Disclosed'));
+        if (r.annual_note) b2.append(mk('p', 'vj-line m', r.annual_note + '.'));
+      }
+      if (r.bonus) b2.append(mk('p', 'vj-line m', `Bonus: ${r.bonus}`));
+      if (r.commission) b2.append(mk('p', 'vj-line m', `Commission: ${r.commission}`));
+      if (r.market_ref) b2.append(mk('p', 'vj-line m', `Third-party estimate (not employer-confirmed): ${r.market_ref}`));
+      const b3 = mk('div', 'vj-dblock'); b3.append(mk('span', 'vj-dlabel', 'Place of work'));
+      b3.append(mk('p', 'vj-line', r.place || r.location));
+      if (r.address) b3.append(mk('p', 'vj-line m', r.address));
+      b3.append(mk('p', 'vj-line m', r.work_mode === 'Not stated' ? 'Arrangement not stated in posting' : r.work_mode));
+      if (r.hours_text) b3.append(mk('p', 'vj-line m', r.hours_text));
+      if (r.benefits) b3.append(mk('p', 'vj-line m', `Benefits: ${r.benefits}`));
+      if (!V.bool(r.shortlist)) b3.append(mk('p', 'vj-line m', `Screened out: sales intensity ${r.sales_intensity}/100 (${r.sales_reasons})`));
+      const b4 = mk('div', 'vj-dblock'); b4.append(mk('span', 'vj-dlabel', 'Posting'));
+      b4.append(mk('p', 'vj-line m', `${srcLabel(r)}${r.posted_text ? ' · ' + r.posted_text : r.posted ? ' · ' + r.posted : ''}`));
+      const go = mk('a', 'vj-go', 'View posting'); go.append(svg(IC.out, 12)); go.href = r.url; go.target = '_blank'; go.rel = 'noopener noreferrer';
+      b4.append(go);
+      det.append(b1, b2, b3, b4);
+      wrap.append(det);
+      return wrap;
+    }));
+  });
+
+  // ---- right column ----
+  dash.draw('gauge', (el) => {
+    const s = dash.data('summary');
+    if (s.status === 'error') { el.replaceChildren(mk('div', 'vj-fail', 'Failed to load')); return; }
+    if (s.status !== 'ok' || !s.data.length) { el.replaceChildren(); return; }
+    const r = s.data[0], share = r.shortlisted / r.total;
+    const W = Math.max(200, Math.min(el.clientWidth || 260, 300)), H = W / 2 + 10, R = W / 2 - 12;
+    const sv = d3.create('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', `Shortlist rate ${Math.round(share * 100)}%`);
+    const g = sv.append('g').attr('transform', `translate(${W / 2},${H - 6})`);
+    const arc = d3.arc().innerRadius(R - 14).outerRadius(R).cornerRadius(7);
+    g.append('path').attr('d', arc({ startAngle: -Math.PI / 2, endAngle: Math.PI / 2 })).attr('fill', 'color-mix(in srgb, currentColor 10%, transparent)').style('color', 'var(--color-fg)');
+    g.append('path').attr('d', arc({ startAngle: -Math.PI / 2, endAngle: -Math.PI / 2 + Math.PI * share })).attr('fill', '#F26B3A');
+    const num = mk('div', 'vj-gauge-num');
+    num.append(mk('b', '', `${Math.round(share * 100)}%`), mk('span', 'vj-muted', `${d3.format(',')(r.shortlisted)} of ${d3.format(',')(r.total)} openings`));
+    el.replaceChildren(sv.node(), num);
+  });
+  V.srcCounts = (rows) => V.SRC.map((s) => ({ ...s, n: rows.filter((r) => V.srcKey(r) === s.key).length }));
+  dash.draw('srcbar', (el) => {
+    const j = dash.data('jobs');
+    if (j.status !== 'ok') { el.replaceChildren(); return; }
+    const c = V.srcCounts(j.data), tot = d3.sum(c, (d) => d.n) || 1;
+    el.replaceChildren(...c.filter((d) => d.n).map((d) => { const s = mk('span'); s.style.flex = String(d.n); s.style.background = d.color; s.title = `${d.label}: ${d.n}`; return s; }));
+  });
+  dash.draw('srcleg', (el) => {
+    const j = dash.data('jobs');
+    if (j.status !== 'ok') { el.replaceChildren(); return; }
+    const c = V.srcCounts(j.data), tot = d3.sum(c, (d) => d.n) || 1;
+    el.replaceChildren(...c.map((d) => {
+      const row = mk('button', 'vj-li'); row.type = 'button'; row.setAttribute('aria-pressed', dash.params().src === d.key ? 'true' : 'false');
+      const left = mk('span', 'vj-leg'); const dot = mk('i'); dot.style.background = d.color; left.append(dot, mk('span', '', d.label));
+      row.append(left, mk('b', '', `${Math.round(100 * d.n / tot)}%`));
+      row.onclick = () => dash.setParams({ src: dash.params().src === d.key ? '' : d.key, limit: V.TH.page });
+      return row;
+    }));
+  });
+  dash.draw('places', (el) => {
+    const j = dash.data('jobs');
+    if (j.status !== 'ok') { el.replaceChildren(); return; }
+    const counts = d3.rollups(j.data.filter((r) => V.bool(r.shortlist)), (v) => v.length, V.cityOf).filter(([c]) => c).sort((a, b) => b[1] - a[1]).slice(0, 7);
+    el.replaceChildren(...counts.map(([c, n]) => {
+      const b = mk('button', 'vj-li'); b.type = 'button'; b.setAttribute('aria-pressed', dash.params().place === c ? 'true' : 'false');
+      b.append(mk('span', '', c), mk('span', 'vj-chip', String(n)));
+      b.onclick = () => dash.setParams({ place: dash.params().place === c ? '' : c, limit: V.TH.page });
+      return b;
+    }));
+  });
+  dash.draw('cats', (el) => {
+    const g = dash.data('by_category');
+    if (g.status !== 'ok') { el.replaceChildren(); return; }
+    el.replaceChildren(...g.data.slice(0, 6).map((r) => {
+      const b = mk('button', 'vj-cat'); b.type = 'button'; b.setAttribute('aria-pressed', dash.params().cat === r.category ? 'true' : 'false');
+      const top = mk('div', 'vj-cat-top'); top.append(mk('span', 'vj-cat-name', r.category), mk('span', 'vj-chip', String(r.roles)));
+      b.append(top, mk('span', 'vj-cat-pay', r.low !== null && r.low !== undefined ? `${V.k(r.low)} – ${V.k(r.high).slice(1)}${r.median_mid ? ` · median ${V.k(r.median_mid)}` : ''}` : 'No yearly ranges posted'));
+      b.onclick = () => dash.setParams({ cat: dash.params().cat === r.category ? '' : r.category, limit: V.TH.page });
+      return b;
+    }));
+  });
+
+  // ---- pay chart ----
+  dash.draw('paychart', (el) => {
+    const j = dash.data('jobs'), g = dash.data('by_category');
+    if (j.status === 'error' || g.status === 'error') { el.replaceChildren(mk('div', 'vj-fail', 'Failed to load')); return; }
+    if (j.status !== 'ok' || g.status !== 'ok') { el.replaceChildren(); return; }
+    const rows = j.data.filter(V.isBase);
+    const cats = g.data.filter((c) => rows.some((r) => r.category === c.category));
+    const W = Math.max(280, el.clientWidth || 600);
+    const m = { l: 8, r: 16, t: 8, b: 28 };
+    const step = 3, labelH = 18, gapH = 14;
+    let y = m.t; const bands = [];
+    cats.forEach((c) => {
+      const rs = rows.filter((r) => r.category === c.category).sort((a, b) => V.num(a.annual_min) - V.num(b.annual_min));
+      bands.push({ c, rs, ly: y + 12, lineY: y + labelH });
+      y += labelH + rs.length * step + gapH;
+    });
+    const H = y + m.b;
+    const xmax = d3.max(rows, (r) => V.num(r.annual_max)) || 1;
+    const x = d3.scaleLinear([0, Math.ceil(xmax / 50000) * 50000], [m.l, W - m.r]);
+    const sv = d3.create('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', 'Advertised yearly base salary ranges by category');
+    const ticks = x.ticks(W < 420 ? 4 : 6);
+    sv.append('g').selectAll('line').data(ticks).join('line').attr('x1', (d) => x(d)).attr('x2', (d) => x(d)).attr('y1', m.t).attr('y2', H - m.b).attr('stroke', 'var(--cds-chart-grid)');
+    const ax = sv.append('g').attr('transform', `translate(0,${H - m.b})`)
+      .call(d3.axisBottom(x).tickValues(ticks).tickFormat((d) => (d === 0 ? '$0' : `$${d / 1000}k`)).tickSizeOuter(0))
+      .attr('font-size', null).attr('font-family', null);
+    ax.selectAll('text').attr('fill', 'var(--color-fg-muted)').style('font-size', 'var(--cds-font-size-caption)');
+    ax.selectAll('line,path').attr('stroke', 'var(--cds-chart-axis)');
+    const tip = mk('div', 'vj-tip'); tip.hidden = true;
+    const show = (ev, r) => {
+      const bx = el.getBoundingClientRect();
+      tip.replaceChildren(mk('div', 'vj-tk', `${r.company} · ${r.place || ''}`), mk('div', '', r.title), mk('div', '', `${V.fmt0(V.num(r.annual_min))}–${V.fmt0(V.num(r.annual_max)).slice(1)} a year`));
+      tip.hidden = false;
+      const tw = tip.offsetWidth, th = tip.offsetHeight;
+      let lx = ev.clientX - bx.left + 12, ly = ev.clientY - bx.top - th - 8;
+      if (lx + tw > bx.width) lx = bx.width - tw - 4;
+      if (ly < 0) ly = ev.clientY - bx.top + 14;
+      tip.style.left = Math.max(0, lx) + 'px'; tip.style.top = ly + 'px';
+    };
+    bands.forEach((b) => {
+      const gb = sv.append('g');
+      gb.append('text').attr('x', m.l).attr('y', b.ly).attr('fill', 'var(--color-fg)').style('font-size', 'var(--cds-font-size-caption)').text(`${b.c.category} · ${b.rs.length}`);
+      b.rs.forEach((r, i) => {
+        const yy = b.lineY + i * step + 2;
+        gb.append('line').attr('x1', x(V.num(r.annual_min))).attr('x2', Math.max(x(V.num(r.annual_max)), x(V.num(r.annual_min)) + 2)).attr('y1', yy).attr('y2', yy)
+          .attr('stroke', V.bool(r.shortlist) ? '#FDB022' : 'var(--cds-chart-muted)').attr('stroke-width', 2).attr('stroke-linecap', 'round');
+        gb.append('line').attr('x1', x(V.num(r.annual_min)) - 4).attr('x2', x(V.num(r.annual_max)) + 4).attr('y1', yy).attr('y2', yy)
+          .attr('stroke', 'transparent').attr('stroke-width', step + 1)
+          .on('mousemove', (ev) => show(ev, r)).on('mouseleave', () => { tip.hidden = true; });
+      });
+      if (b.c.median_mid !== null && b.c.median_mid !== undefined) {
+        const mx = x(V.num(b.c.median_mid));
+        gb.append('line').attr('x1', mx).attr('x2', mx).attr('y1', b.lineY - 4).attr('y2', b.lineY + b.rs.length * step + 4).attr('stroke', '#F26B3A').attr('stroke-width', 2.5).attr('stroke-linecap', 'round');
+      }
+    });
+    el.replaceChildren(sv.node(), tip);
+  });
+</script>
+
+<script>dash.start('data/jobs.json');</script>
+</body>
+</html>

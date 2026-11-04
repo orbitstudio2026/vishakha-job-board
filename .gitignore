@@ -1,0 +1,12 @@
+.DS_Store
+__pycache__/
+scripts/gh/
+scripts/ash/
+scripts/lev/
+scripts/jb/
+scripts/*.log
+scripts/jobs.json
+scripts/jobs_flat.json
+scripts/sel.json
+scripts/wd_sel.json
+scripts/all.json
